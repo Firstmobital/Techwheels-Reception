@@ -106,7 +106,9 @@ export default function ReceptionDashboard() {
     if (Array.isArray(walkin.fuel_types)) {
       return walkin.fuel_types.join(', ');
     }
-    return walkin.fuel_types || 'N/A';
+    if (walkin.fuel_types) return walkin.fuel_types;
+    if (Array.isArray(walkin.fuel_type)) return walkin.fuel_type.join(', ');
+    return walkin.fuel_type || 'N/A';
   };
 
   const getCustomerName = (walkin) => walkin.customer_name || walkin.name || 'N/A';

@@ -8,46 +8,53 @@ export default function CustomerDetailsScreen({ data, onNext, onBack, onCheckMob
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState('');
   const [returningCustomer, setReturningCustomer] = useState(null);
-  const [enquiryChoice, setEnquiryChoice] = useState('');
 
   const checkReturningCustomer = async (rawMobile) => {
     const normalizedMobile = rawMobile.trim();
     if (!normalizedMobile || normalizedMobile.length < 10) {
       setReturningCustomer(null);
-      setEnquiryChoice('');
-      return;
+      return null;
     }
 
-    if (!onCheckMobile) return;
+    if (!onCheckMobile) return null;
 
     setChecking(true);
     setCheckError('');
     try {
       const previousVisit = await onCheckMobile(normalizedMobile);
       setReturningCustomer(previousVisit || null);
-      setEnquiryChoice(previousVisit ? '' : 'new');
       if (previousVisit && !name.trim() && previousVisit.customer_name) {
         setName(previousVisit.customer_name);
       }
+      return previousVisit || null;
     } catch (error) {
       setCheckError(error?.message || 'Unable to check returning customer now.');
+      return null;
     } finally {
       setChecking(false);
     }
   };
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
-    if (returningCustomer && !enquiryChoice) return;
     if (!name.trim() || !mobile.trim()) return;
-    onNext({ name: name.trim(), mobile: mobile.trim() });
+
+    let previousVisit = returningCustomer;
+    if (!previousVisit && mobile.trim().length >= 10) {
+      previousVisit = await checkReturningCustomer(mobile);
+    }
+
+    onNext({
+      name: name.trim(),
+      mobile: mobile.trim(),
+      returningCustomer: previousVisit?.visit_count > 0 ? previousVisit : null
+    });
   };
 
   const handleKeypadPress = (key) => {
     if (key === 'CLR') {
       setMobile('');
       setReturningCustomer(null);
-      setEnquiryChoice('');
       return;
     }
 
@@ -87,7 +94,6 @@ export default function CustomerDetailsScreen({ data, onNext, onBack, onCheckMob
               const value = event.target.value;
               setMobile(value);
               setCheckError('');
-              setEnquiryChoice('');
               if (!value.trim()) {
                 setReturningCustomer(null);
               }
@@ -121,29 +127,12 @@ export default function CustomerDetailsScreen({ data, onNext, onBack, onCheckMob
         {checking ? <p>Checking previous visits...</p> : null}
         {checkError ? <p className="error-text">{checkError}</p> : null}
 
-        {returningCustomer ? (
+        {returningCustomer?.visit_count > 0 ? (
           <div className="returning-card rounded-2xl">
             <h3>Returning Customer Found</h3>
             <p>Customer Name: <strong>{returningCustomer.customer_name || 'N/A'}</strong></p>
-            <p>Last Model: <strong>{returningCustomer.last_model || 'N/A'}</strong></p>
-            <p>Last Salesperson: <strong>{returningCustomer.last_salesperson || 'N/A'}</strong></p>
-
-            <div className="kiosk-actions">
-              <button
-                type="button"
-                className={enquiryChoice === 'continue' ? 'btn h-20 rounded-2xl bg-gradient-to-r from-blue-700 via-sky-600 to-cyan-500 text-white shadow-lg' : 'btn btn-secondary h-20 rounded-2xl'}
-                onClick={() => setEnquiryChoice('continue')}
-              >
-                Continue
-              </button>
-              <button
-                type="button"
-                className={enquiryChoice === 'new' ? 'btn h-20 rounded-2xl bg-gradient-to-r from-blue-700 via-sky-600 to-cyan-500 text-white shadow-lg' : 'btn btn-secondary h-20 rounded-2xl'}
-                onClick={() => setEnquiryChoice('new')}
-              >
-                New Enquiry
-              </button>
-            </div>
+            <p>Previous Interest: <strong>{returningCustomer.last_purpose || 'N/A'}</strong></p>
+            <p>Visits: <strong>{returningCustomer.visit_count}</strong></p>
           </div>
         ) : null}
 
@@ -154,7 +143,7 @@ export default function CustomerDetailsScreen({ data, onNext, onBack, onCheckMob
           <button
             type="submit"
             className="btn h-20 rounded-2xl bg-gradient-to-r from-blue-700 via-sky-600 to-cyan-500 text-white shadow-lg"
-            disabled={checking || (returningCustomer && !enquiryChoice)}
+            disabled={checking}
           >
             Continue
           </button>

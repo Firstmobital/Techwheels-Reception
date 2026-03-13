@@ -70,27 +70,41 @@ export async function createWalkIn({
   mobile_number,
   purpose,
   car_id,
+  fuel_type,
   fuel_types,
   salesperson_id
 }) {
   const token_number = await getNextTokenNumberForToday();
+  const created_at = new Date().toISOString();
+  const normalizedFuelType = fuel_type ?? fuel_types ?? null;
 
   const payload = {
     customer_name,
     mobile_number,
     purpose,
     car_id,
-    fuel_types,
     salesperson_id,
     token_number,
+    created_at,
     status: 'assigned'
   };
 
-  const { data, error } = await supabase
+  let data = null;
+  let error = null;
+
+  ({ data, error } = await supabase
     .from(WALKINS_TABLE)
-    .insert(payload)
+    .insert({ ...payload, fuel_type: normalizedFuelType })
     .select()
-    .single();
+    .single());
+
+  if (error && String(error.message || '').toLowerCase().includes('fuel_type')) {
+    ({ data, error } = await supabase
+      .from(WALKINS_TABLE)
+      .insert({ ...payload, fuel_types: normalizedFuelType })
+      .select()
+      .single());
+  }
 
   if (error) throw error;
   return data;
@@ -137,10 +151,21 @@ export async function getWalkInById(walkinId) {
 }
 
 export async function detectReturningCustomer(mobile) {
+  const normalizedMobile = mobile?.trim();
+  if (!normalizedMobile) return null;
+
+  const { count, error: countError } = await supabase
+    .from(WALKINS_TABLE)
+    .select('id', { count: 'exact', head: true })
+    .eq('mobile_number', normalizedMobile);
+
+  if (countError) throw countError;
+  if (!count) return null;
+
   const { data, error } = await supabase
     .from(WALKINS_TABLE)
-    .select('id, customer_name, mobile_number, car_id, salesperson_id, created_at')
-    .eq('mobile_number', mobile)
+    .select('*')
+    .eq('mobile_number', normalizedMobile)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -150,11 +175,12 @@ export async function detectReturningCustomer(mobile) {
 
   let lastModel = null;
   let lastSalesperson = null;
+  const previousFuelType = data.fuel_type ?? data.fuel_types ?? null;
 
   if (data.car_id) {
     const { data: carData, error: carError } = await supabase
       .from(CARS_TABLE)
-      .select('name, model_name')
+      .select('name')
       .eq('id', data.car_id)
       .maybeSingle();
     if (carError) throw carError;
@@ -172,8 +198,16 @@ export async function detectReturningCustomer(mobile) {
   }
 
   return {
-    ...data,
+    mobile_number: normalizedMobile,
+    customer_name: data.customer_name || null,
+    last_visit_date: data.created_at || null,
     last_model: lastModel,
-    last_salesperson: lastSalesperson
+    last_salesperson: lastSalesperson,
+    last_purpose: data.purpose || null,
+    visit_count: count,
+    purpose: data.purpose || null,
+    car_id: data.car_id || null,
+    fuel_type: previousFuelType,
+    salesperson_id: data.salesperson_id || null
   };
 }
