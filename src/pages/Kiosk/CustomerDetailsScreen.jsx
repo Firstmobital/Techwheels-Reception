@@ -1,7 +1,5 @@
 import { useState } from 'react';
 
-const KEYPAD_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'CLR', '0', 'DEL'];
-
 export default function CustomerDetailsScreen({ data, onNext, onBack, onCheckMobile }) {
   const [name, setName] = useState(data.name || '');
   const [mobile, setMobile] = useState(data.mobile || '');
@@ -51,29 +49,11 @@ export default function CustomerDetailsScreen({ data, onNext, onBack, onCheckMob
     });
   };
 
-  const handleKeypadPress = (key) => {
-    if (key === 'CLR') {
-      setMobile('');
-      setReturningCustomer(null);
-      return;
-    }
-
-    if (key === 'DEL') {
-      setMobile((prev) => prev.slice(0, -1));
-      return;
-    }
-
-    setMobile((prev) => (prev + key).slice(0, 10));
-  };
-
   return (
-    <section className="kiosk-card mx-auto h-[92vh] max-h-[92vh] w-full max-w-[900px] rounded-2xl p-5 shadow-lg">
+    <section className="kiosk-card mx-auto h-[92vh] max-h-[92vh] w-full max-w-[900px] overflow-hidden rounded-2xl p-5 shadow-lg">
       <form className="flex h-full min-h-0 flex-col justify-between gap-3" onSubmit={handleSubmit}>
         <div className="kiosk-grid shrink-0 gap-3">
           <h1 className="kiosk-title !mb-1 text-center text-4xl">Customer Details</h1>
-          <p className="mb-1 text-center text-base text-slate-600">
-            Purpose: <strong>{data.purpose || 'Not selected'}</strong>
-          </p>
 
           <label className="text-lg font-semibold text-slate-700">
             Full Name
@@ -92,8 +72,8 @@ export default function CustomerDetailsScreen({ data, onNext, onBack, onCheckMob
               value={mobile}
               autoFocus
               onChange={(event) => {
-                const value = event.target.value;
-                setMobile(value);
+                const value = event.target.value.replace(/\D/g, '');
+                setMobile(value.slice(0, 10));
                 setCheckError('');
                 if (!value.trim()) {
                   setReturningCustomer(null);
@@ -104,34 +84,9 @@ export default function CustomerDetailsScreen({ data, onNext, onBack, onCheckMob
               type="tel"
               inputMode="numeric"
               pattern="[0-9]*"
-              readOnly
+              maxLength={10}
             />
           </label>
-        </div>
-
-        <div className="min-h-0 flex-1">
-          <div className="mx-auto w-full max-w-[440px]">
-            <div className="grid w-full grid-cols-3 gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2 shadow-inner">
-              {KEYPAD_KEYS.map((key) => (
-                <button
-                  key={key}
-                  type="button"
-                  className={
-                    'h-12 w-full rounded-2xl text-2xl font-bold shadow-sm ' +
-                    (key === 'CLR' || key === 'DEL'
-                      ? 'bg-white text-slate-700'
-                      : 'bg-gradient-to-r from-blue-700 via-sky-600 to-cyan-500 text-white')
-                  }
-                  onClick={() => handleKeypadPress(key)}
-                >
-                  {key}
-                </button>
-              ))}
-            </div>
-
-            {checking ? <p>Checking previous visits...</p> : null}
-            {checkError ? <p className="error-text">{checkError}</p> : null}
-          </div>
         </div>
 
         <div className="kiosk-actions shrink-0 justify-center pt-1">
