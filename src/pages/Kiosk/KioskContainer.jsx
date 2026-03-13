@@ -28,6 +28,8 @@ const DEFAULT_STATE = {
   selectedCarId: '',
   selectedCarName: '',
   fuelTypes: [],
+  selectedLocationId: '',
+  selectedLocationName: '',
   salespersonId: '',
   salespersonName: '',
   walkinId: null,
@@ -144,7 +146,8 @@ export default function KioskContainer() {
                 car_id: repeatData.car_id,
                 fuel_type: repeatData.fuel_type,
                 fuel_types: selectedFuelTypes,
-                salesperson_id: repeatData.salesperson_id
+                salesperson_id: repeatData.salesperson_id,
+                location_id: repeatData.location_id || null
               });
 
               console.assert(Boolean(created?.token_number), '[KIOSK TEST][REPEAT] Token should be generated for repeat customer.');
@@ -182,6 +185,8 @@ export default function KioskContainer() {
               selectedCarId: '',
               selectedCarName: '',
               fuelTypes: [],
+              selectedLocationId: '',
+              selectedLocationName: '',
               salespersonId: '',
               salespersonName: '',
               walkinId: null,
@@ -235,10 +240,11 @@ export default function KioskContainer() {
     if (step === KIOSK_STEPS.SALESPERSON_SELECTION) {
       return (
         <SalespersonSelectionScreen
+          selectedLocationId={walkinData.selectedLocationId}
           selectedSalespersonId={walkinData.salespersonId}
           submitting={saving}
           onBack={() => setStep(KIOSK_STEPS.FUEL_SELECTION)}
-          onNext={async ({ salespersonId, salespersonName }) => {
+          onNext={async ({ salespersonId, salespersonName, locationId, locationName }) => {
             setErrorMessage('');
             setSaving(true);
             try {
@@ -249,7 +255,8 @@ export default function KioskContainer() {
                 car_id: walkinData.selectedCarId,
                 fuel_type: walkinData.fuelTypes,
                 fuel_types: walkinData.fuelTypes,
-                salesperson_id: salespersonId
+                salesperson_id: salespersonId,
+                location_id: locationId
               });
 
               console.assert(Boolean(created?.token_number), '[KIOSK TEST][NEW] Token should be generated for new customer.');
@@ -257,6 +264,8 @@ export default function KioskContainer() {
 
               setWalkinData((prev) => ({
                 ...prev,
+                selectedLocationId: locationId,
+                selectedLocationName: locationName,
                 salespersonId,
                 salespersonName,
                 walkinId: created.id,

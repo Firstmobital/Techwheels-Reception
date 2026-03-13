@@ -2,6 +2,7 @@ import { supabase } from './supabaseClient';
 
 const CARS_TABLE = 'car';
 const EMPLOYEES_TABLE = 'employees';
+const LOCATIONS_TABLE = 'locations';
 const WALKINS_TABLE = 'showroom_walkins';
 
 function formatEmployeeName(employee) {
@@ -187,6 +188,28 @@ export async function getSalesPersons() {
   return data || [];
 }
 
+export async function getLocations() {
+  const { data, error } = await supabase
+    .from(LOCATIONS_TABLE)
+    .select('id,name')
+    .order('name', { ascending: true });
+
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getSalesPersonsByLocation(locationId) {
+  const { data, error } = await supabase
+    .from(EMPLOYEES_TABLE)
+    .select('id,first_name,last_name,location_id')
+    .eq('role_id', 10)
+    .eq('location_id', locationId)
+    .order('first_name', { ascending: true });
+
+  if (error) throw error;
+  return data || [];
+}
+
 export async function createWalkIn({
   customer_name,
   mobile_number,
@@ -194,7 +217,8 @@ export async function createWalkIn({
   car_id,
   fuel_type,
   fuel_types,
-  salesperson_id
+  salesperson_id,
+  location_id
 }) {
   const token_number = await getNextTokenNumberForToday();
   const created_at = new Date().toISOString();
@@ -206,6 +230,7 @@ export async function createWalkIn({
     purpose,
     car_id,
     salesperson_id,
+    location_id,
     token_number,
     created_at,
     status: 'assigned'
