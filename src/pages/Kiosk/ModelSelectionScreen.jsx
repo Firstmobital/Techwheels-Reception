@@ -28,71 +28,94 @@ export default function ModelSelectionScreen({ selectedModelId, onNext, onBack }
   }, []);
 
   const handleContinue = () => {
-    const selectedModel = models.find((item) => String(item.id) === String(selectedId));
+    const selectedModel = models.find(
+      (item) => String(item.id) === String(selectedId)
+    );
     if (!selectedModel) return;
-    onNext({ carId: selectedModel.id, carName: selectedModel.name || selectedModel.model_name || 'Selected model' });
+
+    onNext({
+      carId: selectedModel.id,
+      carName:
+        selectedModel.name ||
+        selectedModel.model_name ||
+        'Selected model'
+    });
   };
 
-  const selectedModel = models.find((item) => String(item.id) === String(selectedId));
-
   return (
-    <section className="kiosk-card mx-auto h-[92vh] max-h-[92vh] w-full max-w-[900px] rounded-2xl p-6 shadow-lg">
-      <div className="flex h-full min-h-0 flex-col justify-between">
-        <div className="shrink-0">
-          <h1 className="kiosk-title !mb-1 text-center text-4xl">Select Model</h1>
-          <p className="mb-4 text-center text-base text-slate-600">Choose a model to continue.</p>
-        </div>
+    <section className="kiosk-card mx-auto w-full max-w-[750px] h-[92vh] flex flex-col rounded-2xl p-6 shadow-lg">
 
-        <div className="grid min-h-0 flex-1 grid-cols-[2fr_1fr] items-start gap-4">
-          <div className="kiosk-grid content-start gap-3">
-            {loading ? <p>Loading models...</p> : null}
-            {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
+      {/* Header */}
+      <div className="shrink-0 text-center">
+        <h1 className="kiosk-title text-4xl mb-1">Select Model</h1>
+        <p className="text-base text-slate-600">
+          Choose a model to continue.
+        </p>
+      </div>
 
-            {!loading ? (
-              <div className="grid grid-cols-3 gap-3">
-                {models.map((model) => (
-                  <button
-                    key={model.id}
-                    type="button"
-                    onClick={() => setSelectedId(String(model.id))}
-                    className={
-                      'h-20 rounded-2xl border text-left text-lg font-semibold shadow-sm transition ' +
-                      (String(selectedId) === String(model.id)
-                        ? 'border-blue-600 bg-gradient-to-r from-blue-700 via-sky-600 to-cyan-500 text-white shadow-lg'
-                        : 'border-slate-200 bg-white text-slate-700')
-                    }
-                  >
-                    <div className="px-4">{model.name || model.model_name || 'Model #' + model.id}</div>
-                  </button>
-                ))}
-              </div>
-            ) : null}
+      {/* Model Grid */}
+      <div className="flex-1 mt-6 min-h-0">
+
+        {loading && (
+          <p className="text-center">Loading models...</p>
+        )}
+
+        {errorMessage && (
+          <p className="error-text text-center">
+            {errorMessage}
+          </p>
+        )}
+
+        {!loading && !errorMessage && (
+          <div className="grid grid-cols-2 gap-4 h-full auto-rows-fr">
+
+            {models.map((model) => (
+              <button
+                key={model.id}
+                type="button"
+                onClick={() => setSelectedId(String(model.id))}
+                className={`flex items-center justify-center rounded-2xl border text-lg font-semibold shadow-sm transition text-center px-4 h-full
+                ${
+                  String(selectedId) === String(model.id)
+                    ? 'border-blue-600 bg-gradient-to-r from-blue-700 via-sky-600 to-cyan-500 text-white shadow-lg'
+                    : 'border-slate-200 bg-white text-slate-700'
+                }`}
+              >
+                {model.name || model.model_name || `Model #${model.id}`}
+              </button>
+            ))}
+
           </div>
+        )}
 
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 shadow-inner">
-            <h3 className="text-lg font-semibold text-slate-700">Selected Model</h3>
-            <p className="mt-2 text-base text-slate-600">
-              {selectedModel
-                ? selectedModel.name || selectedModel.model_name || 'Model #' + selectedModel.id
-                : 'Choose a model from the list'}
-            </p>
-          </div>
-        </div>
+        {!loading && !models.length && (
+          <p className="text-center text-slate-600">
+            No models available.
+          </p>
+        )}
 
-        <div className="kiosk-actions mt-4 shrink-0 justify-center">
-        <button type="button" className="btn btn-secondary h-20 rounded-2xl" onClick={onBack}>
-          Back
-        </button>
+      </div>
+
+      {/* Buttons */}
+      <div className="kiosk-actions shrink-0 justify-center mt-4">
         <button
           type="button"
-          className="btn h-20 rounded-2xl bg-gradient-to-r from-blue-700 via-sky-600 to-cyan-500 text-white shadow-lg"
+          className="btn btn-secondary h-16 rounded-2xl"
+          onClick={onBack}
+        >
+          Back
+        </button>
+
+        <button
+          type="button"
+          className="btn h-16 rounded-2xl bg-gradient-to-r from-blue-700 via-sky-600 to-cyan-500 text-white shadow-lg"
           onClick={handleContinue}
           disabled={!selectedId || loading}
         >
           Continue
         </button>
       </div>
-      </div>
+
     </section>
   );
 }
