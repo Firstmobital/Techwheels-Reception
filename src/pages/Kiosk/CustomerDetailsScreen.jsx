@@ -67,9 +67,9 @@ export default function CustomerDetailsScreen({ data, onNext, onBack, onCheckMob
   };
 
   return (
-    <section className="kiosk-card mx-auto flex h-[90vh] w-full max-w-[600px] flex-col justify-between rounded-2xl p-6 shadow-lg">
-      <form className="flex h-full flex-col justify-between gap-4" onSubmit={handleSubmit}>
-        <div className="kiosk-grid gap-4">
+    <section className="kiosk-card mx-auto flex h-[90vh] w-full max-w-[600px] flex-col justify-between rounded-2xl p-5 shadow-lg">
+      <form className="flex h-full flex-col justify-between gap-3" onSubmit={handleSubmit}>
+        <div className="kiosk-grid gap-3">
           <h1 className="kiosk-title !mb-1 text-center text-4xl">Customer Details</h1>
           <p className="mb-1 text-center text-base text-slate-600">
             Purpose: <strong>{data.purpose || 'Not selected'}</strong>
@@ -109,13 +109,13 @@ export default function CustomerDetailsScreen({ data, onNext, onBack, onCheckMob
           </label>
         </div>
 
-        <div className="kiosk-grid flex-1 content-start gap-3">
-          <div className="grid grid-cols-3 gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 shadow-inner">
+        <div className="kiosk-grid min-h-0 flex-1 content-start gap-2">
+          <div className="grid grid-cols-3 gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2 shadow-inner">
             {KEYPAD_KEYS.map((key) => (
               <button
                 key={key}
                 type="button"
-                className={`h-20 rounded-2xl text-2xl font-bold shadow-sm ${
+                className={`h-12 rounded-2xl text-2xl font-bold shadow-sm ${
                   key === 'CLR' || key === 'DEL'
                     ? 'bg-white text-slate-700'
                     : 'bg-gradient-to-r from-blue-700 via-sky-600 to-cyan-500 text-white'
@@ -140,13 +140,13 @@ export default function CustomerDetailsScreen({ data, onNext, onBack, onCheckMob
           ) : null}
         </div>
 
-        <div className="kiosk-actions mt-2 justify-center">
-          <button type="button" className="btn btn-secondary h-20 rounded-2xl" onClick={onBack}>
+        <div className="kiosk-actions shrink-0 justify-center pt-1">
+          <button type="button" className="btn btn-secondary h-14 rounded-2xl" onClick={onBack}>
             Back
           </button>
           <button
             type="submit"
-            className="btn h-20 rounded-2xl bg-gradient-to-r from-blue-700 via-sky-600 to-cyan-500 text-white shadow-lg"
+            className="btn h-14 rounded-2xl bg-gradient-to-r from-blue-700 via-sky-600 to-cyan-500 text-white shadow-lg"
             disabled={checking}
           >
             Continue
