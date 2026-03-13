@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import KioskContainer from './pages/Kiosk/KioskContainer';
 import ReceptionDashboard from './pages/Reception/ReceptionDashboard';
+import IVREntryScreen from './pages/Reception/IVREntryScreen';
+import GreenFormQueue from './pages/Reception/GreenFormQueue';
 
 export default function App() {
   const [activeInterface, setActiveInterface] = useState('kiosk');
@@ -13,19 +15,36 @@ export default function App() {
           className={activeInterface === 'kiosk' ? 'active' : ''}
           onClick={() => setActiveInterface('kiosk')}
         >
-          Customer Kiosk
+          Kiosk
         </button>
         <button
           type="button"
-          className={activeInterface === 'reception' ? 'active' : ''}
-          onClick={() => setActiveInterface('reception')}
+          className={activeInterface === 'dashboard' ? 'active' : ''}
+          onClick={() => setActiveInterface('dashboard')}
         >
-          Reception Dashboard
+          Dashboard
+        </button>
+        <button
+          type="button"
+          className={activeInterface === 'ivr-entry' ? 'active' : ''}
+          onClick={() => setActiveInterface('ivr-entry')}
+        >
+          IVR Entry
+        </button>
+        <button
+          type="button"
+          className={activeInterface === 'green-form' ? 'active' : ''}
+          onClick={() => setActiveInterface('green-form')}
+        >
+          Green Form
         </button>
       </header>
 
       <main className={activeInterface === 'kiosk' ? 'kiosk-fullscreen' : 'reception-shell'}>
-        {activeInterface === 'kiosk' ? <KioskContainer /> : <ReceptionDashboard />}
+        {activeInterface === 'kiosk' ? <KioskContainer /> : null}
+        {activeInterface === 'dashboard' ? <ReceptionDashboard /> : null}
+        {activeInterface === 'ivr-entry' ? <IVREntryScreen /> : null}
+        {activeInterface === 'green-form' ? <GreenFormQueue /> : null}
       </main>
     </div>
   );

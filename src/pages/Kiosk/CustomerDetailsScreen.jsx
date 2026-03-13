@@ -35,16 +35,21 @@ export default function CustomerDetailsScreen({ data, onNext, onBack, onCheckMob
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (!name.trim() || !mobile.trim()) return;
+    const normalizedMobile = mobile.trim();
+    if (!name.trim() || !normalizedMobile) return;
+    if (!/^\d{10}$/.test(normalizedMobile)) {
+      setCheckError('Please enter a valid 10-digit mobile number.');
+      return;
+    }
 
     let previousVisit = returningCustomer;
-    if (!previousVisit && mobile.trim().length >= 10) {
+    if (!previousVisit && normalizedMobile.length === 10) {
       previousVisit = await checkReturningCustomer(mobile);
     }
 
     onNext({
       name: name.trim(),
-      mobile: mobile.trim(),
+      mobile: normalizedMobile,
       returningCustomer: previousVisit?.visit_count > 0 ? previousVisit : null
     });
   };
@@ -83,7 +88,8 @@ export default function CustomerDetailsScreen({ data, onNext, onBack, onCheckMob
               placeholder="Enter mobile number"
               type="tel"
               inputMode="numeric"
-              pattern="[0-9]*"
+              pattern="[0-9]{10}"
+              minLength={10}
               maxLength={10}
             />
           </label>

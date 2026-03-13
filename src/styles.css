@@ -397,6 +397,16 @@ body {
   color: var(--text-subtle);
 }
 
+.ivr-entry-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.ivr-span-2 {
+  grid-column: span 2;
+}
+
 @media (max-width: 768px) {
   .kiosk-card {
     padding: 1.2rem;
@@ -420,6 +430,14 @@ body {
   .report-summary-grid,
   .report-grid {
     grid-template-columns: 1fr;
+  }
+
+  .ivr-entry-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ivr-span-2 {
+    grid-column: span 1;
   }
 }
 
