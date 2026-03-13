@@ -1,3 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
   --brand-primary: #1a3a6c;
   --brand-primary-dark: #102949;
@@ -21,6 +25,7 @@ body {
   min-height: 100dvh;
   background: var(--brand-bg);
   touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
 }
 
 #root {
@@ -44,9 +49,11 @@ body {
   border: 0;
   border-radius: 999px;
   padding: 0.55rem 0.95rem;
+  min-height: 44px;
   color: #cbd5e1;
   background: #1e293b;
   font-weight: 600;
+  font-size: 1rem;
   cursor: pointer;
 }
 
@@ -180,6 +187,37 @@ body {
   font-size: 1.1rem;
 }
 
+.salesperson-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.salesperson-card {
+  border: 1px solid var(--soft-border);
+  border-radius: 12px;
+  min-height: 92px;
+  padding: 1rem;
+  background: #f8fbff;
+  color: var(--text-main);
+  font-size: 1.15rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.salesperson-card.active {
+  border-color: var(--brand-primary);
+  box-shadow: 0 0 0 3px rgba(26, 58, 108, 0.15);
+  background: #eef4ff;
+}
+
+.token-number {
+  font-size: clamp(2.4rem, 5vw, 4rem);
+  color: var(--brand-primary-dark);
+  margin: 0.45rem 0 0.85rem;
+}
+
 .error-text {
   color: #b91c1c;
   margin: 0;
@@ -252,11 +290,51 @@ body {
   }
 
   .purpose-grid,
-  .fuel-grid {
+  .fuel-grid,
+  .salesperson-grid {
     grid-template-columns: 1fr;
   }
 
   .kiosk-actions {
     flex-direction: column;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1180px) {
+  .kiosk-fullscreen {
+    padding: 1.5rem;
+  }
+
+  .kiosk-grid {
+    width: 100%;
+    max-width: 640px;
+    margin-inline: auto;
+  }
+
+  .kiosk-card {
+    padding: 1.75rem;
+    border-radius: 22px;
+  }
+
+  .kiosk-title {
+    font-size: clamp(2rem, 4vw, 2.6rem);
+  }
+
+  .btn,
+  .kiosk-input,
+  .kiosk-select {
+    min-height: 72px;
+    font-size: 1.15rem;
+  }
+
+  .interface-switch {
+    padding: 0.85rem;
+    gap: 0.75rem;
+  }
+
+  .interface-switch button {
+    min-height: 50px;
+    padding: 0.65rem 1.1rem;
+    font-size: 1.05rem;
   }
 }

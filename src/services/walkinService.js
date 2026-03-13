@@ -4,6 +4,12 @@ const CARS_TABLE = 'car';
 const EMPLOYEES_TABLE = 'employees';
 const WALKINS_TABLE = 'showroom_walkins';
 
+function formatEmployeeName(employee) {
+  const firstName = employee?.first_name?.trim() || '';
+  const lastName = employee?.last_name?.trim() || '';
+  return `${firstName} ${lastName}`.trim() || null;
+}
+
 function formatTokenNumber(tokenValue) {
   return `T${String(tokenValue).padStart(3, '0')}`;
 }
@@ -51,9 +57,9 @@ export async function getAvailableCars() {
 export async function getSalesPersons() {
   const { data, error } = await supabase
     .from(EMPLOYEES_TABLE)
-    .select('*')
+    .select('id, first_name, last_name')
     .eq('role_id', 10)
-    .order('id', { ascending: true });
+    .order('first_name', { ascending: true });
 
   if (error) throw error;
   return data || [];
@@ -64,15 +70,20 @@ export async function createWalkIn({
   mobile_number,
   purpose,
   car_id,
-  fuel_types
+  fuel_types,
+  salesperson_id
 }) {
+  const token_number = await getNextTokenNumberForToday();
+
   const payload = {
     customer_name,
     mobile_number,
     purpose,
     car_id,
     fuel_types,
-    status: 'waiting'
+    salesperson_id,
+    token_number,
+    status: 'assigned'
   };
 
   const { data, error } = await supabase
@@ -153,11 +164,11 @@ export async function detectReturningCustomer(mobile) {
   if (data.salesperson_id) {
     const { data: employeeData, error: employeeError } = await supabase
       .from(EMPLOYEES_TABLE)
-      .select('name, full_name')
+      .select('first_name, last_name')
       .eq('id', data.salesperson_id)
       .maybeSingle();
     if (employeeError) throw employeeError;
-    lastSalesperson = employeeData?.name || employeeData?.full_name || null;
+    lastSalesperson = formatEmployeeName(employeeData);
   }
 
   return {

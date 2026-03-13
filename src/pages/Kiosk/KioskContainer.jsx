@@ -3,11 +3,11 @@ import WelcomeScreen from './WelcomeScreen';
 import CustomerDetailsScreen from './CustomerDetailsScreen';
 import ModelSelectionScreen from './ModelSelectionScreen';
 import FuelSelectionScreen from './FuelSelectionScreen';
+import SalespersonSelectionScreen from './SalespersonSelectionScreen';
 import TokenScreen from './TokenScreen';
 import {
   createWalkIn,
-  detectReturningCustomer,
-  getWalkInById
+  detectReturningCustomer
 } from '../../services/walkinService';
 
 const KIOSK_STEPS = {
@@ -15,7 +15,8 @@ const KIOSK_STEPS = {
   CUSTOMER_DETAILS: 2,
   MODEL_SELECTION: 3,
   FUEL_SELECTION: 4,
-  TOKEN: 5
+  SALESPERSON_SELECTION: 5,
+  TOKEN: 6
 };
 
 const DEFAULT_STATE = {
@@ -25,6 +26,8 @@ const DEFAULT_STATE = {
   selectedCarId: '',
   selectedCarName: '',
   fuelTypes: [],
+  salespersonId: '',
+  salespersonName: '',
   walkinId: null,
   tokenNumber: ''
 };
@@ -34,27 +37,6 @@ export default function KioskContainer() {
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [walkinData, setWalkinData] = useState(DEFAULT_STATE);
-
-  const isWaitingForAssignment = step === KIOSK_STEPS.TOKEN && !walkinData.tokenNumber;
-
-  useEffect(() => {
-    if (!isWaitingForAssignment || !walkinData.walkinId) return undefined;
-
-    const poll = async () => {
-      try {
-        const record = await getWalkInById(walkinData.walkinId);
-        if (record?.status === 'assigned' && record?.token_number) {
-          setWalkinData((prev) => ({ ...prev, tokenNumber: record.token_number }));
-        }
-      } catch {
-        // Keep polling silently; transient network failures should not break kiosk flow.
-      }
-    };
-
-    poll();
-    const intervalId = window.setInterval(poll, 5000);
-    return () => window.clearInterval(intervalId);
-  }, [isWaitingForAssignment, walkinData.walkinId]);
 
   const resetFlow = useCallback(() => {
     setWalkinData(DEFAULT_STATE);
@@ -129,9 +111,26 @@ export default function KioskContainer() {
       return (
         <FuelSelectionScreen
           selectedFuels={walkinData.fuelTypes}
-          saving={saving}
           onBack={() => setStep(KIOSK_STEPS.MODEL_SELECTION)}
-          onNext={async (fuelTypes) => {
+          onNext={(fuelTypes) => {
+            setErrorMessage('');
+            setWalkinData((prev) => ({
+              ...prev,
+              fuelTypes
+            }));
+            setStep(KIOSK_STEPS.SALESPERSON_SELECTION);
+          }}
+        />
+      );
+    }
+
+    if (step === KIOSK_STEPS.SALESPERSON_SELECTION) {
+      return (
+        <SalespersonSelectionScreen
+          selectedSalespersonId={walkinData.salespersonId}
+          submitting={saving}
+          onBack={() => setStep(KIOSK_STEPS.FUEL_SELECTION)}
+          onNext={async ({ salespersonId, salespersonName }) => {
             setErrorMessage('');
             setSaving(true);
             try {
@@ -140,14 +139,16 @@ export default function KioskContainer() {
                 mobile_number: walkinData.mobileNumber,
                 purpose: walkinData.purpose,
                 car_id: walkinData.selectedCarId,
-                fuel_types: fuelTypes
+                fuel_types: walkinData.fuelTypes,
+                salesperson_id: salespersonId
               });
 
               setWalkinData((prev) => ({
                 ...prev,
-                fuelTypes,
+                salespersonId,
+                salespersonName,
                 walkinId: created.id,
-                tokenNumber: ''
+                tokenNumber: created.token_number || ''
               }));
               setStep(KIOSK_STEPS.TOKEN);
             } catch (error) {
@@ -163,14 +164,13 @@ export default function KioskContainer() {
     return (
       <TokenScreen
         data={walkinData}
-        waiting={!walkinData.tokenNumber}
         onDone={resetFlow}
       />
     );
   }, [saving, step, walkinData]);
 
   return (
-    <div className="kiosk-grid">
+    <div className="kiosk-grid mx-auto w-full max-w-[600px]">
       {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
       <div key={step} className="step-transition">
         {stepView}

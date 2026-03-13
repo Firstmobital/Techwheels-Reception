@@ -34,34 +34,43 @@ export default function ModelSelectionScreen({ selectedModelId, onNext, onBack }
   };
 
   return (
-    <section className="kiosk-card">
-      <h1 className="kiosk-title">Select Model</h1>
-      <div className="kiosk-grid">
+    <section className="kiosk-card mx-auto w-full max-w-[600px] rounded-2xl p-6 shadow-lg">
+      <h1 className="kiosk-title !mb-1 text-center text-4xl">Select Model</h1>
+      <p className="mb-5 text-center text-base text-slate-600">Choose a model to continue.</p>
+
+      <div className="kiosk-grid gap-4">
         {loading ? <p>Loading models...</p> : null}
         {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
         {!loading ? (
-          <select
-            className="kiosk-select"
-            value={selectedId}
-            onChange={(event) => setSelectedId(event.target.value)}
-          >
-            <option value="" disabled>
-              Choose a model
-            </option>
+          <div className="grid grid-cols-2 gap-3">
             {models.map((model) => (
-              <option key={model.id} value={model.id}>
-                {model.name || model.model_name || `Model #${model.id}`}
-              </option>
+              <button
+                key={model.id}
+                type="button"
+                onClick={() => setSelectedId(String(model.id))}
+                className={`h-24 rounded-2xl border text-left text-lg font-semibold shadow-sm transition ${
+                  String(selectedId) === String(model.id)
+                    ? 'border-blue-600 bg-gradient-to-r from-blue-700 via-sky-600 to-cyan-500 text-white shadow-lg'
+                    : 'border-slate-200 bg-white text-slate-700'
+                }`}
+              >
+                <div className="px-4">{model.name || model.model_name || `Model #${model.id}`}</div>
+              </button>
             ))}
-          </select>
+          </div>
         ) : null}
       </div>
 
-      <div className="kiosk-actions">
-        <button type="button" className="btn btn-secondary" onClick={onBack}>
+      <div className="kiosk-actions mt-4 justify-center">
+        <button type="button" className="btn btn-secondary h-20 rounded-2xl" onClick={onBack}>
           Back
         </button>
-        <button type="button" className="btn btn-primary" onClick={handleContinue} disabled={!selectedId || loading}>
+        <button
+          type="button"
+          className="btn h-20 rounded-2xl bg-gradient-to-r from-blue-700 via-sky-600 to-cyan-500 text-white shadow-lg"
+          onClick={handleContinue}
+          disabled={!selectedId || loading}
+        >
           Continue
         </button>
       </div>

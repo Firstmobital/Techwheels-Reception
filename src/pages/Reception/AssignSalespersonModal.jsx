@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react';
 import { getSalesPersons } from '../../services/walkinService';
 
+function getDisplayName(person) {
+  const firstName = person?.first_name?.trim() || '';
+  const lastName = person?.last_name?.trim() || '';
+  const fullName = `${firstName} ${lastName}`.trim();
+  return fullName || 'Unnamed salesperson';
+}
+
 export default function AssignSalespersonModal({ walkin, onAssign, onClose }) {
   const [salespersonId, setSalespersonId] = useState('');
   const [salespersons, setSalespersons] = useState([]);
@@ -51,7 +58,7 @@ export default function AssignSalespersonModal({ walkin, onAssign, onClose }) {
           <option value="">Select salesperson</option>
           {salespersons.map((person) => (
             <option key={person.id} value={person.id}>
-              {person.name || person.full_name || `Employee #${person.id}`}
+              {getDisplayName(person)}
             </option>
           ))}
         </select>
