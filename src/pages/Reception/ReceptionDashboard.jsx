@@ -1,183 +1,180 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import AssignSalespersonModal from './AssignSalespersonModal';
-import {
-  assignSalesPerson,
-  getAvailableCars,
-  getWaitingWalkins
-} from '../../services/walkinService';
-import { supabase } from '../../services/supabaseClient';
+import { getWalkinReports } from '../../services/walkinService';
 
 export default function ReceptionDashboard() {
-  const [walkins, setWalkins] = useState([]);
-  const [carMap, setCarMap] = useState({});
-  const [selectedWalkinId, setSelectedWalkinId] = useState(null);
+  const defaultCustomDate = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const [filterType, setFilterType] = useState('today');
+  const [customDate, setCustomDate] = useState(defaultCustomDate);
+  const [reportData, setReportData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [statusMessage, setStatusMessage] = useState('');
 
-  const selectedWalkin = useMemo(
-    () => walkins.find((item) => item.id === selectedWalkinId) || null,
-    [walkins, selectedWalkinId]
-  );
-
-  const loadDashboardData = useCallback(async (isInitialLoad = false) => {
-    if (isInitialLoad) {
-      setLoading(true);
-    } else {
-      setRefreshing(true);
-    }
-
+  const loadReports = useCallback(async () => {
+    setLoading(true);
     setErrorMessage('');
     try {
-      const [waitingWalkins, cars] = await Promise.all([
-        getWaitingWalkins(),
-        getAvailableCars()
-      ]);
-      setWalkins(waitingWalkins);
-      setCarMap(
-        cars.reduce((acc, car) => {
-          acc[car.id] = car.name || car.model_name || `Model #${car.id}`;
-          return acc;
-        }, {})
-      );
+      const reports = await getWalkinReports({
+        filterType,
+        customDate
+      });
+      setReportData(reports);
     } catch (error) {
-      setErrorMessage(error?.message || 'Unable to load waiting customers.');
+      setErrorMessage(error?.message || 'Unable to load reports.');
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
-  }, []);
+  }, [customDate, filterType]);
 
   useEffect(() => {
-    loadDashboardData(true);
-  }, [loadDashboardData]);
+    loadReports();
+  }, [loadReports]);
 
-  useEffect(() => {
-    const channel = supabase
-      .channel('reception-showroom-walkins')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'showroom_walkins'
-        },
-        (payload) => {
-          if (payload.new?.status === 'waiting') {
-            loadDashboardData();
-          }
-        }
-      )
-      .subscribe();
+  const filterLabel = useMemo(() => {
+    if (filterType === 'thisMonth') return 'This Month';
+    if (filterType === 'custom') return 'Custom Date';
+    return 'Today';
+  }, [filterType]);
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [loadDashboardData]);
-
-  const handleAssignSalesperson = async (salespersonId) => {
-    if (!selectedWalkinId) return;
-
-    setStatusMessage('');
-    setErrorMessage('');
-    try {
-      const updated = await assignSalesPerson(selectedWalkinId, salespersonId);
-      setStatusMessage(`Assigned successfully. Token generated: ${updated.token_number}`);
-      setSelectedWalkinId(null);
-      await loadDashboardData();
-    } catch (error) {
-      setErrorMessage(error?.message || 'Unable to assign salesperson.');
-    }
+  const getMetricLabel = (label, fallback = 'Unknown') => {
+    const value = String(label || '').trim();
+    return value || fallback;
   };
-
-  const getModelName = (walkin) => {
-    return (
-      walkin.car_name ||
-      walkin.model_name ||
-      walkin.cars?.name ||
-      walkin.cars?.model_name ||
-      carMap[walkin.car_id] ||
-      'N/A'
-    );
-  };
-
-  const getFuelTypesLabel = (walkin) => {
-    if (Array.isArray(walkin.fuel_types)) {
-      return walkin.fuel_types.join(', ');
-    }
-    if (walkin.fuel_types) return walkin.fuel_types;
-    if (Array.isArray(walkin.fuel_type)) return walkin.fuel_type.join(', ');
-    return walkin.fuel_type || 'N/A';
-  };
-
-  const getCustomerName = (walkin) => walkin.customer_name || walkin.name || 'N/A';
-  const getMobile = (walkin) => walkin.mobile_number || walkin.mobile || 'N/A';
 
   if (loading) {
     return (
-      <section className="panel">
-        <h1>Reception Dashboard</h1>
-        <p>Loading waiting customers...</p>
+      <section className="panel report-panel">
+        <h1>Reports</h1>
+        <p>Loading walk-in reports...</p>
       </section>
     );
   }
 
   return (
-    <section className="panel">
-      <h1>Reception Dashboard</h1>
-      <p>Waiting walk-ins ready for advisor assignment.</p>
+    <section className="panel report-panel">
+      <header className="report-header">
+        <h1>Reports</h1>
+        <p>Showroom walk-in analytics for reception.</p>
+      </header>
+
+      <div className="report-filter-row">
+        <button
+          type="button"
+          className={`report-filter-btn ${filterType === 'today' ? 'active' : ''}`}
+          onClick={() => setFilterType('today')}
+        >
+          Today
+        </button>
+        <button
+          type="button"
+          className={`report-filter-btn ${filterType === 'thisMonth' ? 'active' : ''}`}
+          onClick={() => setFilterType('thisMonth')}
+        >
+          This Month
+        </button>
+        <button
+          type="button"
+          className={`report-filter-btn ${filterType === 'custom' ? 'active' : ''}`}
+          onClick={() => setFilterType('custom')}
+        >
+          Custom Date
+        </button>
+      </div>
+
+      {filterType === 'custom' ? (
+        <div className="report-custom-date-wrap">
+          <input
+            type="date"
+            className="report-date-input"
+            value={customDate}
+            onChange={(event) => setCustomDate(event.target.value)}
+            max={defaultCustomDate}
+          />
+        </div>
+      ) : null}
 
       {errorMessage ? <p className="error-text">{errorMessage}</p> : null}
-      {statusMessage ? <p>{statusMessage}</p> : null}
-      {refreshing ? <p>Refreshing dashboard...</p> : null}
 
-      <table className="walkin-table">
-        <thead>
-          <tr>
-            <th>Customer Name</th>
-            <th>Mobile</th>
-            <th>Model</th>
-            <th>Fuel Types</th>
-            <th>Purpose</th>
-            <th>Assign Button</th>
-          </tr>
-        </thead>
-        <tbody>
-          {walkins.length === 0 ? (
-            <tr>
-              <td colSpan={6}>No waiting customers.</td>
-            </tr>
-          ) : (
-            walkins.map((walkin) => (
-              <tr key={walkin.id}>
-                <td>{getCustomerName(walkin)}</td>
-                <td>{getMobile(walkin)}</td>
-                <td>{getModelName(walkin)}</td>
-                <td>{getFuelTypesLabel(walkin)}</td>
-                <td>{walkin.purpose || 'N/A'}</td>
-                <td>
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    onClick={() => setSelectedWalkinId(walkin.id)}
-                  >
-                    Assign
-                  </button>
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
+      {reportData ? (
+        <>
+          <div className="report-summary-grid">
+            <article className="report-card report-total-card">
+              <h2>Total Walk-ins</h2>
+              <p className="report-total-value">{reportData.totalWalkins}</p>
+              <p className="report-meta">Range: {reportData.dateRange.label}</p>
+            </article>
+            <article className="report-card">
+              <h2>Filter</h2>
+              <p className="report-meta">{filterLabel}</p>
+            </article>
+          </div>
 
-      {selectedWalkin && (
-        <AssignSalespersonModal
-          walkin={selectedWalkin}
-          onAssign={handleAssignSalesperson}
-          onClose={() => setSelectedWalkinId(null)}
-        />
-      )}
+          <div className="report-grid">
+            <article className="report-card">
+              <h2>Purpose Breakdown</h2>
+              <ul className="report-list">
+                {reportData.purposeBreakdown.length ? (
+                  reportData.purposeBreakdown.map((item) => (
+                    <li key={`purpose-${item.label}`} className="report-list-item">
+                      <span>{getMetricLabel(item.label)}</span>
+                      <strong>{item.count}</strong>
+                    </li>
+                  ))
+                ) : (
+                  <li className="report-list-empty">No purpose data available.</li>
+                )}
+              </ul>
+            </article>
+
+            <article className="report-card">
+              <h2>Model Interest</h2>
+              <ul className="report-list">
+                {reportData.modelInterest.length ? (
+                  reportData.modelInterest.map((item) => (
+                    <li key={`model-${item.label}`} className="report-list-item">
+                      <span>{getMetricLabel(item.label)}</span>
+                      <strong>{item.count}</strong>
+                    </li>
+                  ))
+                ) : (
+                  <li className="report-list-empty">No model interest data available.</li>
+                )}
+              </ul>
+            </article>
+
+            <article className="report-card">
+              <h2>Fuel Preference</h2>
+              <ul className="report-list">
+                {reportData.fuelPreference.length ? (
+                  reportData.fuelPreference.map((item) => (
+                    <li key={`fuel-${item.label}`} className="report-list-item">
+                      <span>{getMetricLabel(item.label)}</span>
+                      <strong>{item.count}</strong>
+                    </li>
+                  ))
+                ) : (
+                  <li className="report-list-empty">No fuel preference data available.</li>
+                )}
+              </ul>
+            </article>
+
+            <article className="report-card">
+              <h2>Salesperson Performance</h2>
+              <ul className="report-list">
+                {reportData.salespersonPerformance.length ? (
+                  reportData.salespersonPerformance.map((item) => (
+                    <li key={`sp-${item.label}`} className="report-list-item">
+                      <span>{getMetricLabel(item.label, 'Unassigned')}</span>
+                      <strong>{item.count}</strong>
+                    </li>
+                  ))
+                ) : (
+                  <li className="report-list-empty">No salesperson performance data available.</li>
+                )}
+              </ul>
+            </article>
+          </div>
+        </>
+      ) : null}
     </section>
   );
 }

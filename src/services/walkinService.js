@@ -21,6 +21,128 @@ function parseTokenNumber(tokenString) {
   return Number(match[1]) || 0;
 }
 
+function toStartOfDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function addDays(date, days) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+}
+
+function normalizeCountEntries(countMap) {
+  return [...countMap.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      return a.label.localeCompare(b.label);
+    });
+}
+
+function normalizePurposeLabel(purpose) {
+  const value = purpose?.trim();
+  return value || 'Unknown';
+}
+
+function normalizeFuelValues(walkin) {
+  const fuel = walkin.fuel_type || walkin.fuel_types;
+  const fuelSource = fuel;
+  if (Array.isArray(fuelSource)) {
+    return fuelSource.map((item) => String(item || '').trim()).filter(Boolean);
+  }
+
+  if (typeof fuelSource === 'string') {
+    return fuelSource
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function getWalkinModelName(walkin) {
+  return walkin?.car?.name?.trim() || 'Unknown';
+}
+
+function getWalkinSalespersonName(walkin) {
+  const firstName = walkin?.salesperson?.first_name?.trim() || '';
+  const lastName = walkin?.salesperson?.last_name?.trim() || '';
+  const fullName = `${firstName} ${lastName}`.trim();
+  return fullName || 'Unassigned';
+}
+
+function getReportDateRange(filterType = 'today', customDate = '') {
+  const now = new Date();
+
+  if (filterType === 'thisMonth') {
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    return {
+      start,
+      end,
+      label: start.toLocaleDateString(undefined, {
+        month: 'long',
+        year: 'numeric'
+      })
+    };
+  }
+
+  if (filterType === 'custom') {
+    if (!customDate) {
+      throw new Error('Please select a date for custom report.');
+    }
+
+    const selected = new Date(`${customDate}T00:00:00`);
+    if (Number.isNaN(selected.getTime())) {
+      throw new Error('Invalid custom date selected.');
+    }
+
+    const start = toStartOfDay(selected);
+    const end = addDays(start, 1);
+    return {
+      start,
+      end,
+      label: start.toLocaleDateString(undefined, {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric'
+      })
+    };
+  }
+
+  const start = toStartOfDay(now);
+  const end = addDays(start, 1);
+  return {
+    start,
+    end,
+    label: 'Today'
+  };
+}
+
+async function getCarsByIds(carIds) {
+  if (!carIds.length) return [];
+
+  const { data, error } = await supabase
+    .from(CARS_TABLE)
+    .select('id, name, model_name')
+    .in('id', carIds);
+
+  if (error) throw error;
+  return data || [];
+}
+
+async function getEmployeesByIds(employeeIds) {
+  if (!employeeIds.length) return [];
+
+  const { data, error } = await supabase
+    .from(EMPLOYEES_TABLE)
+    .select('id, first_name, last_name')
+    .in('id', employeeIds);
+
+  if (error) throw error;
+  return data || [];
+}
+
 async function getNextTokenNumberForToday() {
   const now = new Date();
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -209,5 +331,99 @@ export async function detectReturningCustomer(mobile) {
     car_id: data.car_id || null,
     fuel_type: previousFuelType,
     salesperson_id: data.salesperson_id || null
+  };
+}
+
+export async function getWalkinsByCreatedAtRange({ startIso, endIso }) {
+  let data = null;
+  let error = null;
+
+  ({ data, error } = await supabase
+    .from(WALKINS_TABLE)
+    .select(`
+      id,
+      purpose,
+      fuel_types,
+      fuel_type,
+      car_id,
+      salesperson_id,
+      created_at,
+      car:car_id(name),
+      salesperson:salesperson_id(first_name,last_name)
+    `)
+    .gte('created_at', startIso)
+    .lt('created_at', endIso)
+    .order('created_at', { ascending: false }));
+
+  if (error && String(error.message || '').toLowerCase().includes('fuel_type')) {
+    ({ data, error } = await supabase
+      .from(WALKINS_TABLE)
+      .select(`
+        id,
+        purpose,
+        fuel_types,
+        car_id,
+        salesperson_id,
+        created_at,
+        car:car_id(name),
+        salesperson:salesperson_id(first_name,last_name)
+      `)
+      .gte('created_at', startIso)
+      .lt('created_at', endIso)
+      .order('created_at', { ascending: false }));
+  }
+
+  if (error) throw error;
+
+  return (data || []).map((row) => ({
+    ...row,
+    fuel_type: row.fuel_type || row.fuel_types || null
+  }));
+}
+
+export async function getWalkinReports({ filterType = 'today', customDate = '' } = {}) {
+  const { start, end, label } = getReportDateRange(filterType, customDate);
+  const startIso = start.toISOString();
+  const endIso = end.toISOString();
+
+  const walkins = await getWalkinsByCreatedAtRange({ startIso, endIso });
+
+  const purposeCounts = new Map();
+  const modelCounts = new Map();
+  const fuelCounts = new Map();
+  const salespersonCounts = new Map();
+
+  walkins.forEach((walkin) => {
+    const purposeLabel = normalizePurposeLabel(walkin.purpose);
+    purposeCounts.set(purposeLabel, (purposeCounts.get(purposeLabel) || 0) + 1);
+
+    const modelLabel = getWalkinModelName(walkin);
+    modelCounts.set(modelLabel, (modelCounts.get(modelLabel) || 0) + 1);
+
+    const fuels = normalizeFuelValues(walkin);
+    if (fuels.length === 0) {
+      fuelCounts.set('Unknown', (fuelCounts.get('Unknown') || 0) + 1);
+    } else {
+      fuels.forEach((fuel) => {
+        fuelCounts.set(fuel, (fuelCounts.get(fuel) || 0) + 1);
+      });
+    }
+
+    const salespersonName = getWalkinSalespersonName(walkin);
+    salespersonCounts.set(salespersonName, (salespersonCounts.get(salespersonName) || 0) + 1);
+  });
+
+  return {
+    filterType,
+    dateRange: {
+      startIso,
+      endIso,
+      label
+    },
+    totalWalkins: walkins.length,
+    purposeBreakdown: normalizeCountEntries(purposeCounts),
+    modelInterest: normalizeCountEntries(modelCounts),
+    fuelPreference: normalizeCountEntries(fuelCounts),
+    salespersonPerformance: normalizeCountEntries(salespersonCounts)
   };
 }
