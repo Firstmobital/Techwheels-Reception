@@ -9,6 +9,19 @@ export default function CustomerDetailsScreen({ data, onNext, onBack, onCheckMob
   const [checkError, setCheckError] = useState('');
   const [returningCustomer, setReturningCustomer] = useState(null);
 
+  const lastModel =
+    returningCustomer?.last_model ||
+    returningCustomer?.last_model_name ||
+    returningCustomer?.model_name ||
+    returningCustomer?.car_name ||
+    null;
+  const lastSalesAdvisor =
+    returningCustomer?.last_sales_advisor ||
+    returningCustomer?.last_salesperson ||
+    returningCustomer?.sales_advisor ||
+    returningCustomer?.salesperson_name ||
+    null;
+
   const checkReturningCustomer = async (rawMobile) => {
     const normalizedMobile = rawMobile.trim();
     if (!normalizedMobile || normalizedMobile.length < 10) {
@@ -63,13 +76,13 @@ export default function CustomerDetailsScreen({ data, onNext, onBack, onCheckMob
       return;
     }
 
-    setMobile((prev) => `${prev}${key}`.slice(0, 10));
+    setMobile((prev) => (prev + key).slice(0, 10));
   };
 
   return (
-    <section className="kiosk-card mx-auto flex h-[90vh] w-full max-w-[600px] flex-col justify-between rounded-2xl p-5 shadow-lg">
-      <form className="flex h-full flex-col justify-between gap-3" onSubmit={handleSubmit}>
-        <div className="kiosk-grid gap-3">
+    <section className="kiosk-card mx-auto h-[92vh] max-h-[92vh] w-full max-w-[900px] rounded-2xl p-5 shadow-lg">
+      <form className="flex h-full min-h-0 flex-col justify-between gap-3" onSubmit={handleSubmit}>
+        <div className="kiosk-grid shrink-0 gap-3">
           <h1 className="kiosk-title !mb-1 text-center text-4xl">Customer Details</h1>
           <p className="mb-1 text-center text-base text-slate-600">
             Purpose: <strong>{data.purpose || 'Not selected'}</strong>
@@ -109,35 +122,46 @@ export default function CustomerDetailsScreen({ data, onNext, onBack, onCheckMob
           </label>
         </div>
 
-        <div className="kiosk-grid min-h-0 flex-1 content-start gap-2">
-          <div className="grid grid-cols-3 gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2 shadow-inner">
-            {KEYPAD_KEYS.map((key) => (
-              <button
-                key={key}
-                type="button"
-                className={`h-12 rounded-2xl text-2xl font-bold shadow-sm ${
-                  key === 'CLR' || key === 'DEL'
-                    ? 'bg-white text-slate-700'
-                    : 'bg-gradient-to-r from-blue-700 via-sky-600 to-cyan-500 text-white'
-                }`}
-                onClick={() => handleKeypadPress(key)}
-              >
-                {key}
-              </button>
-            ))}
+        <div className="grid min-h-0 flex-1 grid-cols-[1.45fr_1fr] items-start gap-4">
+          <div className="w-full">
+            <div className="flex w-full justify-center">
+              <div className="grid w-full max-w-[440px] grid-cols-3 gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2 shadow-inner">
+                {KEYPAD_KEYS.map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={
+                      'h-12 w-full rounded-2xl text-2xl font-bold shadow-sm ' +
+                      (key === 'CLR' || key === 'DEL'
+                        ? 'bg-white text-slate-700'
+                        : 'bg-gradient-to-r from-blue-700 via-sky-600 to-cyan-500 text-white')
+                    }
+                    onClick={() => handleKeypadPress(key)}
+                  >
+                    {key}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mx-auto w-full max-w-[440px]">
+              {checking ? <p>Checking previous visits...</p> : null}
+              {checkError ? <p className="error-text">{checkError}</p> : null}
+            </div>
           </div>
 
-          {checking ? <p>Checking previous visits...</p> : null}
-          {checkError ? <p className="error-text">{checkError}</p> : null}
-
-          {returningCustomer?.visit_count > 0 ? (
-            <div className="returning-card rounded-2xl">
-              <h3>Returning Customer Found</h3>
-              <p>Customer Name: <strong>{returningCustomer.customer_name || 'N/A'}</strong></p>
-              <p>Previous Interest: <strong>{returningCustomer.last_purpose || 'N/A'}</strong></p>
-              <p>Visits: <strong>{returningCustomer.visit_count}</strong></p>
-            </div>
-          ) : null}
+          <div className="flex min-h-[180px] w-full justify-end">
+            {returningCustomer?.visit_count > 0 ? (
+              <div className="returning-card w-full max-w-[260px] rounded-2xl">
+                <h3>Returning Customer Found</h3>
+                <p>Customer Name: <strong>{returningCustomer.customer_name || 'N/A'}</strong></p>
+                <p>Previous Interest: <strong>{returningCustomer.last_purpose || 'N/A'}</strong></p>
+                <p>Visit Count: <strong>{returningCustomer.visit_count}</strong></p>
+                <p>Last Model: <strong>{lastModel || 'N/A'}</strong></p>
+                <p>Last Sales Advisor: <strong>{lastSalesAdvisor || 'N/A'}</strong></p>
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <div className="kiosk-actions shrink-0 justify-center pt-1">
