@@ -172,6 +172,22 @@ export default function ReceptionDashboard() {
                 )}
               </ul>
             </article>
+
+            <article className="report-card">
+              <h2>Branch Walk-ins</h2>
+              <ul className="report-list">
+                {reportData.branchWalkins?.length ? (
+                  reportData.branchWalkins.map((item) => (
+                    <li key={`branch-${item.label}`} className="report-list-item">
+                      <span>{getMetricLabel(item.label)}</span>
+                      <strong>{item.count}</strong>
+                    </li>
+                  ))
+                ) : (
+                  <li className="report-list-empty">No branch data available.</li>
+                )}
+              </ul>
+            </article>
           </div>
         </>
       ) : null}

@@ -371,10 +371,12 @@ export async function getWalkinsByCreatedAtRange({ startIso, endIso }) {
       fuel_types,
       fuel_type,
       car_id,
+      location_id,
       salesperson_id,
       created_at,
       car:car_id(name),
-      salesperson:salesperson_id(first_name,last_name)
+      salesperson:salesperson_id(first_name,last_name),
+      location:location_id(name)
     `)
     .gte('created_at', startIso)
     .lt('created_at', endIso)
@@ -388,10 +390,12 @@ export async function getWalkinsByCreatedAtRange({ startIso, endIso }) {
         purpose,
         fuel_types,
         car_id,
+        location_id,
         salesperson_id,
         created_at,
         car:car_id(name),
-        salesperson:salesperson_id(first_name,last_name)
+        salesperson:salesperson_id(first_name,last_name),
+        location:location_id(name)
       `)
       .gte('created_at', startIso)
       .lt('created_at', endIso)
@@ -417,6 +421,7 @@ export async function getWalkinReports({ filterType = 'today', customDate = '' }
   const modelCounts = new Map();
   const fuelCounts = new Map();
   const salespersonCounts = new Map();
+  const branchCounts = new Map();
 
   walkins.forEach((walkin) => {
     const purposeLabel = normalizePurposeLabel(walkin.purpose);
@@ -436,6 +441,9 @@ export async function getWalkinReports({ filterType = 'today', customDate = '' }
 
     const salespersonName = getWalkinSalespersonName(walkin);
     salespersonCounts.set(salespersonName, (salespersonCounts.get(salespersonName) || 0) + 1);
+
+    const branchName = walkin?.location?.name?.trim() || 'Unknown';
+    branchCounts.set(branchName, (branchCounts.get(branchName) || 0) + 1);
   });
 
   return {
@@ -449,6 +457,7 @@ export async function getWalkinReports({ filterType = 'today', customDate = '' }
     purposeBreakdown: normalizeCountEntries(purposeCounts),
     modelInterest: normalizeCountEntries(modelCounts),
     fuelPreference: normalizeCountEntries(fuelCounts),
-    salespersonPerformance: normalizeCountEntries(salespersonCounts)
+    salespersonPerformance: normalizeCountEntries(salespersonCounts),
+    branchWalkins: normalizeCountEntries(branchCounts)
   };
 }
