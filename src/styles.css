@@ -1,0 +1,262 @@
+:root {
+  --brand-primary: #1a3a6c;
+  --brand-primary-dark: #102949;
+  --brand-surface: #ffffff;
+  --brand-bg: #ffffff;
+  --text-main: #10203a;
+  --text-subtle: #4b5d78;
+  --soft-border: #dbe3ee;
+  --soft-shadow: 0 18px 42px rgba(16, 41, 73, 0.14);
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  color: var(--text-main);
+  background: var(--brand-bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--brand-bg);
+  touch-action: manipulation;
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+.app-shell {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.interface-switch {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: #0f172a;
+}
+
+.interface-switch button {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.55rem 0.95rem;
+  color: #cbd5e1;
+  background: #1e293b;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.interface-switch button.active {
+  background: #2563eb;
+  color: #fff;
+}
+
+.kiosk-fullscreen {
+  flex: 1;
+  min-height: calc(100dvh - 58px);
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+  background: radial-gradient(circle at 15% 15%, #eff4fb 0%, #ffffff 45%);
+}
+
+.kiosk-card {
+  width: min(980px, 100%);
+  border-radius: 24px;
+  background: var(--brand-surface);
+  border: 1px solid var(--soft-border);
+  padding: 2.2rem;
+  box-shadow: var(--soft-shadow);
+}
+
+.kiosk-title {
+  margin-top: 0;
+  margin-bottom: 0.6rem;
+  color: var(--brand-primary);
+  letter-spacing: 0.2px;
+  font-size: clamp(1.9rem, 3.5vw, 3rem);
+}
+
+.kiosk-grid {
+  display: grid;
+  gap: 1rem;
+  width: min(980px, 100%);
+}
+
+.step-transition {
+  animation: stepFadeIn 280ms ease-out;
+}
+
+@keyframes stepFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.purpose-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.kiosk-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.kiosk-input,
+.kiosk-select {
+  width: 100%;
+  border: 1px solid var(--soft-border);
+  border-radius: 12px;
+  padding: 1rem 1rem;
+  min-height: 64px;
+  font-size: 1.1rem;
+}
+
+.btn {
+  border: 0;
+  border-radius: 12px;
+  padding: 0.95rem 1.2rem;
+  min-height: 80px;
+  min-width: 170px;
+  font-weight: 600;
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition: transform 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+}
+
+.btn:active {
+  transform: translateY(0);
+}
+
+.btn-primary {
+  background: var(--brand-primary);
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(26, 58, 108, 0.25);
+}
+
+.btn-purpose {
+  background: var(--brand-primary);
+  color: #fff;
+  width: 100%;
+}
+
+.btn-secondary {
+  background: #edf2fa;
+  color: var(--brand-primary-dark);
+}
+
+.fuel-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.fuel-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 80px;
+  border: 1px solid var(--soft-border);
+  border-radius: 12px;
+  padding: 0.95rem;
+  font-size: 1.1rem;
+}
+
+.error-text {
+  color: #b91c1c;
+  margin: 0;
+}
+
+.returning-card {
+  border: 1px solid #c6d7f1;
+  background: #f4f8ff;
+  border-radius: 12px;
+  padding: 0.9rem;
+}
+
+.returning-card h3 {
+  margin: 0 0 0.6rem;
+}
+
+.returning-card p {
+  margin: 0.35rem 0;
+}
+
+.reception-shell {
+  flex: 1;
+  padding: 1rem;
+}
+
+.panel {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+  padding: 1rem;
+}
+
+.walkin-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+.walkin-table th,
+.walkin-table td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0.75rem;
+  text-align: left;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.modal-card {
+  width: min(500px, 100%);
+  background: #fff;
+  border-radius: 16px;
+  padding: 1rem;
+}
+
+@media (max-width: 768px) {
+  .kiosk-card {
+    padding: 1.2rem;
+    border-radius: 18px;
+  }
+
+  .kiosk-fullscreen {
+    padding: 1rem;
+  }
+
+  .purpose-grid,
+  .fuel-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .kiosk-actions {
+    flex-direction: column;
+  }
+}
