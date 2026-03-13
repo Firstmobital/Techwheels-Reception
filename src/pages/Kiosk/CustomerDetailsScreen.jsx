@@ -50,8 +50,8 @@ export default function CustomerDetailsScreen({ data, onNext, onBack, onCheckMob
   };
 
   return (
-    <section className="kiosk-card mx-auto h-[92vh] max-h-[92vh] w-full max-w-[900px] overflow-hidden rounded-2xl p-5 shadow-lg">
-      <form className="flex h-full min-h-0 flex-col justify-between gap-3" onSubmit={handleSubmit}>
+    <section className="kiosk-card mx-auto w-full max-w-[600px] flex flex-col rounded-2xl p-5 shadow-lg">
+      <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
         <div className="kiosk-grid shrink-0 gap-3">
           <h1 className="kiosk-title !mb-1 text-center text-4xl">Customer Details</h1>
 
@@ -89,7 +89,7 @@ export default function CustomerDetailsScreen({ data, onNext, onBack, onCheckMob
           </label>
         </div>
 
-        <div className="kiosk-actions shrink-0 justify-center pt-1">
+        <div className="kiosk-actions shrink-0 justify-center">
           <button type="button" className="btn btn-secondary h-14 rounded-2xl" onClick={onBack}>
             Back
           </button>
