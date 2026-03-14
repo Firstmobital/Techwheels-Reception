@@ -10,7 +10,10 @@ function getRowKey(row) {
 }
 
 function formatSource(sourceType) {
-  return String(sourceType || '').toLowerCase() === 'ivr' ? 'IVR' : 'Walk-in';
+  const normalizedSourceType = String(sourceType || '').toLowerCase();
+  if (normalizedSourceType === 'ivr') return 'IVR';
+  if (normalizedSourceType === 'ai') return 'AI Lead';
+  return 'Walk-in';
 }
 
 function formatDate(value) {

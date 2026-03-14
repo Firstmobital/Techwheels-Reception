@@ -64,11 +64,15 @@ export async function getPendingLeads() {
 export async function submitOptyId(source_type, id, opty_id) {
   const normalizedSourceType = String(source_type || '').trim().toLowerCase();
 
-  if (normalizedSourceType !== 'walkin' && normalizedSourceType !== 'ivr') {
-    throw new Error('Invalid source_type. Expected walkin or ivr.');
+  if (normalizedSourceType !== 'walkin' && normalizedSourceType !== 'ivr' && normalizedSourceType !== 'ai') {
+    throw new Error('Invalid source_type. Expected walkin, ivr or ai.');
   }
 
-  const tableName = normalizedSourceType === 'walkin' ? WALKINS_TABLE : IVR_LEADS_TABLE;
+  const tableName = normalizedSourceType === 'walkin'
+    ? WALKINS_TABLE
+    : normalizedSourceType === 'ivr'
+      ? IVR_LEADS_TABLE
+      : 'ai_leads';
 
   const { data, error } = await supabase
     .from(tableName)
@@ -92,7 +96,7 @@ export async function getTodayGreenFormStats() {
   const startIso = startOfDay.toISOString();
   const endIso = endOfDay.toISOString();
 
-  const [pendingResult, walkinUploadedResult, ivrUploadedResult] = await Promise.all([
+  const [pendingResult, walkinUploadedResult, ivrUploadedResult, aiUploadedResult] = await Promise.all([
     supabase
       .from(GREENFORM_PENDING_LEADS_VIEW)
       .select('id', { count: 'exact', head: true })
@@ -109,15 +113,25 @@ export async function getTodayGreenFormStats() {
       .select('id', { count: 'exact', head: true })
       .eq('opty_status', 'submitted')
       .gte('opty_submitted_at', startIso)
+      .lt('opty_submitted_at', endIso),
+    supabase
+      .from('ai_leads')
+      .select('id', { count: 'exact', head: true })
+      .eq('opty_status', 'submitted')
+      .gte('opty_submitted_at', startIso)
       .lt('opty_submitted_at', endIso)
   ]);
 
   if (pendingResult.error) throw pendingResult.error;
   if (walkinUploadedResult.error) throw walkinUploadedResult.error;
   if (ivrUploadedResult.error) throw ivrUploadedResult.error;
+  if (aiUploadedResult.error) throw aiUploadedResult.error;
 
   const pending_today = pendingResult.count || 0;
-  const uploaded_today = (walkinUploadedResult.count || 0) + (ivrUploadedResult.count || 0);
+  const uploaded_today =
+    (walkinUploadedResult.count || 0) +
+    (ivrUploadedResult.count || 0) +
+    (aiUploadedResult.count || 0);
 
   return {
     pending_today,
