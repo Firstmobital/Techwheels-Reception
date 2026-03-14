@@ -1,11 +1,39 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import KioskContainer from './pages/Kiosk/KioskContainer';
 import ReceptionDashboard from './pages/Reception/ReceptionDashboard';
 import IVREntryScreen from './pages/Reception/IVREntryScreen';
 import GreenFormQueue from './pages/Reception/GreenFormQueue';
+import LoginPage from './pages/LoginPage';
+import { clearAuthSession, restoreAuthSession } from './services/authService';
 
 export default function App() {
   const [activeInterface, setActiveInterface] = useState('kiosk');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  useEffect(() => {
+    async function restoreSession() {
+      const session = await restoreAuthSession();
+      if (session?.isAuthenticated) {
+        setIsAuthenticated(true);
+      }
+    }
+
+    restoreSession();
+  }, []);
+
+  function handleLoginSuccess() {
+    setIsAuthenticated(true);
+  }
+
+  async function handleLogout() {
+    await clearAuthSession();
+    setIsAuthenticated(false);
+    setActiveInterface('kiosk');
+  }
+
+  if (!isAuthenticated) {
+    return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  }
 
   return (
     <div className="app-shell">
@@ -37,6 +65,9 @@ export default function App() {
           onClick={() => setActiveInterface('green-form')}
         >
           Green Form
+        </button>
+        <button type="button" className="logout-btn" onClick={handleLogout}>
+          Logout
         </button>
       </header>
 
