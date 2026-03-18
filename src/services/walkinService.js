@@ -458,6 +458,7 @@ export async function getWalkinReports({ filterType = 'today', customDate = '' }
     modelInterest: normalizeCountEntries(modelCounts),
     fuelPreference: normalizeCountEntries(fuelCounts),
     salespersonPerformance: normalizeCountEntries(salespersonCounts),
-    branchWalkins: normalizeCountEntries(branchCounts)
+    branchWalkins: normalizeCountEntries(branchCounts),
+    rows: walkins
   };
 }

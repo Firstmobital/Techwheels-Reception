@@ -4,6 +4,7 @@ import { getWalkinReports } from '../../services/walkinService';
 export default function ReceptionDashboard() {
   const defaultCustomDate = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const [filterType, setFilterType] = useState('today');
+  const [viewMode, setViewMode] = useState('summary');
   const [customDate, setCustomDate] = useState(defaultCustomDate);
   const [reportData, setReportData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -38,6 +39,25 @@ export default function ReceptionDashboard() {
   const getMetricLabel = (label, fallback = 'Unknown') => {
     const value = String(label || '').trim();
     return value || fallback;
+  };
+
+  const getTableValue = (value) => {
+    const text = String(value || '').trim();
+    return text || '-';
+  };
+
+  const formatDate = (value) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '-';
+    return date.toLocaleDateString();
+  };
+
+  const formatTime = (value) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '-';
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
   if (loading) {
@@ -80,6 +100,23 @@ export default function ReceptionDashboard() {
         </button>
       </div>
 
+      <div className="report-filter-row">
+        <button
+          type="button"
+          className={`report-filter-btn ${viewMode === 'summary' ? 'active' : ''}`}
+          onClick={() => setViewMode('summary')}
+        >
+          Summary
+        </button>
+        <button
+          type="button"
+          className={`report-filter-btn ${viewMode === 'table' ? 'active' : ''}`}
+          onClick={() => setViewMode('table')}
+        >
+          Table View
+        </button>
+      </div>
+
       {filterType === 'custom' ? (
         <div className="report-custom-date-wrap">
           <input
@@ -96,99 +133,154 @@ export default function ReceptionDashboard() {
 
       {reportData ? (
         <>
-          <div className="report-summary-grid">
-            <article className="report-card report-total-card">
-              <h2>Total Walk-ins</h2>
-              <p className="report-total-value">{reportData.totalWalkins}</p>
-              <p className="report-meta">Range: {reportData.dateRange.label}</p>
-            </article>
-            <article className="report-card">
-              <h2>Filter</h2>
-              <p className="report-meta">{filterLabel}</p>
-            </article>
-          </div>
+          {viewMode === 'summary' ? (
+            <>
+              <div className="report-summary-grid">
+                <article className="report-card report-total-card">
+                  <h2>Total Walk-ins</h2>
+                  <p className="report-total-value">{reportData.totalWalkins}</p>
+                  <p className="report-meta">Range: {reportData.dateRange.label}</p>
+                </article>
+                <article className="report-card">
+                  <h2>Filter</h2>
+                  <p className="report-meta">{filterLabel}</p>
+                </article>
+              </div>
 
-          <div className="report-grid">
-            <article className="report-card">
-              <h2>Purpose Breakdown</h2>
-              <ul className="report-list">
-                {reportData.purposeBreakdown.length ? (
-                  reportData.purposeBreakdown.map((item) => (
-                    <li key={`purpose-${item.label}`} className="report-list-item">
-                      <span>{getMetricLabel(item.label)}</span>
-                      <strong>{item.count}</strong>
-                    </li>
-                  ))
-                ) : (
-                  <li className="report-list-empty">No purpose data available.</li>
-                )}
-              </ul>
-            </article>
+              <div className="report-grid">
+                <article className="report-card">
+                  <h2>Purpose Breakdown</h2>
+                  <ul className="report-list">
+                    {reportData.purposeBreakdown.length ? (
+                      reportData.purposeBreakdown.map((item) => (
+                        <li key={`purpose-${item.label}`} className="report-list-item">
+                          <span>{getMetricLabel(item.label)}</span>
+                          <strong>{item.count}</strong>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="report-list-empty">No purpose data available.</li>
+                    )}
+                  </ul>
+                </article>
 
-            <article className="report-card">
-              <h2>Model Interest</h2>
-              <ul className="report-list">
-                {reportData.modelInterest.length ? (
-                  reportData.modelInterest.map((item) => (
-                    <li key={`model-${item.label}`} className="report-list-item">
-                      <span>{getMetricLabel(item.label)}</span>
-                      <strong>{item.count}</strong>
-                    </li>
-                  ))
-                ) : (
-                  <li className="report-list-empty">No model interest data available.</li>
-                )}
-              </ul>
-            </article>
+                <article className="report-card">
+                  <h2>Model Interest</h2>
+                  <ul className="report-list">
+                    {reportData.modelInterest.length ? (
+                      reportData.modelInterest.map((item) => (
+                        <li key={`model-${item.label}`} className="report-list-item">
+                          <span>{getMetricLabel(item.label)}</span>
+                          <strong>{item.count}</strong>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="report-list-empty">No model interest data available.</li>
+                    )}
+                  </ul>
+                </article>
 
-            <article className="report-card">
-              <h2>Fuel Preference</h2>
-              <ul className="report-list">
-                {reportData.fuelPreference.length ? (
-                  reportData.fuelPreference.map((item) => (
-                    <li key={`fuel-${item.label}`} className="report-list-item">
-                      <span>{getMetricLabel(item.label)}</span>
-                      <strong>{item.count}</strong>
-                    </li>
-                  ))
-                ) : (
-                  <li className="report-list-empty">No fuel preference data available.</li>
-                )}
-              </ul>
-            </article>
+                <article className="report-card">
+                  <h2>Fuel Preference</h2>
+                  <ul className="report-list">
+                    {reportData.fuelPreference.length ? (
+                      reportData.fuelPreference.map((item) => (
+                        <li key={`fuel-${item.label}`} className="report-list-item">
+                          <span>{getMetricLabel(item.label)}</span>
+                          <strong>{item.count}</strong>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="report-list-empty">No fuel preference data available.</li>
+                    )}
+                  </ul>
+                </article>
 
-            <article className="report-card">
-              <h2>Salesperson Performance</h2>
-              <ul className="report-list">
-                {reportData.salespersonPerformance.length ? (
-                  reportData.salespersonPerformance.map((item) => (
-                    <li key={`sp-${item.label}`} className="report-list-item">
-                      <span>{getMetricLabel(item.label, 'Unassigned')}</span>
-                      <strong>{item.count}</strong>
-                    </li>
-                  ))
-                ) : (
-                  <li className="report-list-empty">No salesperson performance data available.</li>
-                )}
-              </ul>
-            </article>
+                <article className="report-card">
+                  <h2>Salesperson Performance</h2>
+                  <ul className="report-list">
+                    {reportData.salespersonPerformance.length ? (
+                      reportData.salespersonPerformance.map((item) => (
+                        <li key={`sp-${item.label}`} className="report-list-item">
+                          <span>{getMetricLabel(item.label, 'Unassigned')}</span>
+                          <strong>{item.count}</strong>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="report-list-empty">No salesperson performance data available.</li>
+                    )}
+                  </ul>
+                </article>
 
+                <article className="report-card">
+                  <h2>Branch Walk-ins</h2>
+                  <ul className="report-list">
+                    {reportData.branchWalkins?.length ? (
+                      reportData.branchWalkins.map((item) => (
+                        <li key={`branch-${item.label}`} className="report-list-item">
+                          <span>{getMetricLabel(item.label)}</span>
+                          <strong>{item.count}</strong>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="report-list-empty">No branch data available.</li>
+                    )}
+                  </ul>
+                </article>
+              </div>
+            </>
+          ) : (
             <article className="report-card">
-              <h2>Branch Walk-ins</h2>
-              <ul className="report-list">
-                {reportData.branchWalkins?.length ? (
-                  reportData.branchWalkins.map((item) => (
-                    <li key={`branch-${item.label}`} className="report-list-item">
-                      <span>{getMetricLabel(item.label)}</span>
-                      <strong>{item.count}</strong>
-                    </li>
-                  ))
-                ) : (
-                  <li className="report-list-empty">No branch data available.</li>
-                )}
-              </ul>
+              <h2>Walk-in Rows</h2>
+              <p className="report-meta">Rows: {reportData.rows?.length || 0}</p>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="walkin-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Time</th>
+                      <th>Customer Name</th>
+                      <th>Mobile Number</th>
+                      <th>Purpose</th>
+                      <th>Interested Model</th>
+                      <th>Fuel Type</th>
+                      <th>Salesperson</th>
+                      <th>Branch / Location</th>
+                      <th>Created At</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reportData.rows?.length ? (
+                      reportData.rows.map((row) => {
+                        const salespersonName = `${row?.salesperson?.first_name || ''} ${row?.salesperson?.last_name || ''}`.trim();
+
+                        return (
+                          <tr key={row.id}>
+                            <td>{formatDate(row.created_at)}</td>
+                            <td>{formatTime(row.created_at)}</td>
+                            <td>{getTableValue(row.customer_name)}</td>
+                            <td>{getTableValue(row.mobile_number || row.mobile)}</td>
+                            <td>{getTableValue(row.purpose)}</td>
+                            <td>{getTableValue(row?.car?.name)}</td>
+                            <td>{getTableValue(row.fuel_type)}</td>
+                            <td>{getTableValue(salespersonName)}</td>
+                            <td>{getTableValue(row?.location?.name)}</td>
+                            <td>{getTableValue(row.created_at)}</td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td colSpan={10} className="report-list-empty">
+                          No walk-in rows available for this range.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </article>
-          </div>
+          )}
         </>
       ) : null}
     </section>
