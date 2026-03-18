@@ -149,6 +149,7 @@ export default function GreenFormQueue() {
                 <th>Customer Name</th>
                 <th>Mobile Number</th>
                 <th>Model</th>
+                <th>Fuel</th>
                 <th>Branch</th>
                 <th>Sales Advisor</th>
                 <th>Source</th>
@@ -167,6 +168,7 @@ export default function GreenFormQueue() {
                     <td>{row.customer_name || '-'}</td>
                     <td>{row.mobile_number || '-'}</td>
                     <td>{row.model_name || '-'}</td>
+                    <td>{row.fuel_types?.length ? row.fuel_types.join(' / ') : '-'}</td>
                     <td>{row.location_name || '-'}</td>
                     <td>{row.salesperson_name || '-'}</td>
                     <td>{formatSource(row.source_type)}</td>

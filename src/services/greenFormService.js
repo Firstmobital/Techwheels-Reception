@@ -15,7 +15,7 @@ function formatEmployeeName(employee) {
 export async function getPendingLeads() {
   const { data: leads, error: leadsError } = await supabase
     .from(GREENFORM_PENDING_LEADS_VIEW)
-    .select('id, source_type, customer_name, mobile_number, model_name, salesperson_id, location_id, created_at, opty_id')
+    .select('id, source_type, customer_name, mobile_number, model_name, fuel_types, salesperson_id, location_id, created_at, opty_id')
     .order('created_at', { ascending: false });
 
   if (leadsError) throw leadsError;
@@ -54,6 +54,7 @@ export async function getPendingLeads() {
     customer_name: lead.customer_name,
     mobile_number: lead.mobile_number,
     model_name: lead.model_name,
+    fuel_types: lead.fuel_types,
     salesperson_name: employeeNameById.get(lead.salesperson_id) || null,
     location_name: locationNameById.get(lead.location_id) || null,
     created_at: lead.created_at,
