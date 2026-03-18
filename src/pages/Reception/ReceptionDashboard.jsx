@@ -243,35 +243,40 @@ export default function ReceptionDashboard() {
                       <th>Mobile Number</th>
                       <th>Purpose</th>
                       <th>Interested Model</th>
-                      <th>Fuel Type</th>
+                      <th>Fuel Types</th>
                       <th>Salesperson</th>
-                      <th>Branch / Location</th>
-                      <th>Created At</th>
+                      <th>Location</th>
+                      <th>Token Number</th>
+                      <th>Status</th>
+                      <th>Opty Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {reportData.rows?.length ? (
                       reportData.rows.map((row) => {
                         const salespersonName = `${row?.salesperson?.first_name || ''} ${row?.salesperson?.last_name || ''}`.trim();
+                        const fuelTypes = Array.isArray(row?.fuel_types) ? row.fuel_types.join(', ') : '-';
 
                         return (
                           <tr key={row.id}>
                             <td>{formatDate(row.created_at)}</td>
                             <td>{formatTime(row.created_at)}</td>
                             <td>{getTableValue(row.customer_name)}</td>
-                            <td>{getTableValue(row.mobile_number || row.mobile)}</td>
+                            <td>{getTableValue(row.mobile_number)}</td>
                             <td>{getTableValue(row.purpose)}</td>
                             <td>{getTableValue(row?.car?.name)}</td>
-                            <td>{getTableValue(row.fuel_type)}</td>
+                            <td>{getTableValue(fuelTypes)}</td>
                             <td>{getTableValue(salespersonName)}</td>
                             <td>{getTableValue(row?.location?.name)}</td>
-                            <td>{getTableValue(row.created_at)}</td>
+                            <td>{getTableValue(row.token_number)}</td>
+                            <td>{getTableValue(row.status)}</td>
+                            <td>{getTableValue(row.opty_status)}</td>
                           </tr>
                         );
                       })
                     ) : (
                       <tr>
-                        <td colSpan={10} className="report-list-empty">
+                        <td colSpan={12} className="report-list-empty">
                           No walk-in rows available for this range.
                         </td>
                       </tr>

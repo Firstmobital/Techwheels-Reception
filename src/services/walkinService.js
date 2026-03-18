@@ -360,47 +360,30 @@ export async function detectReturningCustomer(mobile) {
 }
 
 export async function getWalkinsByCreatedAtRange({ startIso, endIso }) {
-  let data = null;
-  let error = null;
-
-  ({ data, error } = await supabase
+  const { data, error } = await supabase
     .from(WALKINS_TABLE)
     .select(`
       id,
+      customer_name,
+      mobile_number,
       purpose,
       fuel_types,
-      fuel_type,
+      token_number,
+      status,
+      opty_id,
+      opty_status,
+      opty_submitted_at,
       car_id,
       location_id,
       salesperson_id,
       created_at,
-      car:car_id(name),
-      salesperson:salesperson_id(first_name,last_name),
-      location:location_id(name)
+      car:car_id(id,name),
+      salesperson:salesperson_id(id,first_name,last_name),
+      location:location_id(id,name)
     `)
     .gte('created_at', startIso)
     .lt('created_at', endIso)
-    .order('created_at', { ascending: false }));
-
-  if (error && String(error.message || '').toLowerCase().includes('fuel_type')) {
-    ({ data, error } = await supabase
-      .from(WALKINS_TABLE)
-      .select(`
-        id,
-        purpose,
-        fuel_types,
-        car_id,
-        location_id,
-        salesperson_id,
-        created_at,
-        car:car_id(name),
-        salesperson:salesperson_id(first_name,last_name),
-        location:location_id(name)
-      `)
-      .gte('created_at', startIso)
-      .lt('created_at', endIso)
-      .order('created_at', { ascending: false }));
-  }
+    .order('created_at', { ascending: false });
 
   if (error) throw error;
 
