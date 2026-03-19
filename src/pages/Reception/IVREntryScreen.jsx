@@ -104,7 +104,8 @@ async function fetchIVREntries(dateFilter) {
     .from(AI_LEADS_TABLE)
     .select('id, customer_name, mobile_number, model_name, salesperson_id, location_id, remarks, lead_source, opty_status, lead_disposition, created_at, updated_at')
     .eq('lead_source', 'IVR')
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .range(0, 9999); // override Supabase default page limit to fetch all rows
 
   const range = getDateRange(dateFilter);
   if (range) {
