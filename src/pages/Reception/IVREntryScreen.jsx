@@ -139,7 +139,6 @@ export default function IVREntryScreen() {
           isValidMobileNumber &&
           form.modelName.trim() &&
           form.locationId &&
-          form.salespersonId &&
           form.remarks.trim()
       ),
     [form, isValidMobileNumber]
@@ -163,10 +162,6 @@ export default function IVREntryScreen() {
       setErrorMessage('Please select branch.');
       return;
     }
-    if (!form.salespersonId) {
-      setErrorMessage('Please select sales advisor.');
-      return;
-    }
     if (!form.remarks.trim()) {
       setErrorMessage('Please enter remarks.');
       return;
@@ -181,14 +176,14 @@ export default function IVREntryScreen() {
         customer_name: form.customerName.trim(),
         mobile_number: form.mobileNumber.trim(),
         model_name: form.modelName.trim(),
-        salesperson_id: form.salespersonId,
+        salesperson_id: form.salespersonId || null,
         location_id: form.locationId,
         remarks: form.remarks.trim()
       });
 
       setForm(INITIAL_FORM);
       setSalespersons([]);
-      setSuccessMessage('IVR lead saved successfully.');
+      setSuccessMessage('IVR lead saved and sent to AI nurturing queue.');
     } catch (error) {
       setErrorMessage(error?.message || 'Unable to save IVR lead.');
     } finally {
@@ -301,7 +296,6 @@ export default function IVREntryScreen() {
               setErrorMessage('');
               setSuccessMessage('');
             }}
-            required
             disabled={!form.locationId || loadingSalespersons || saving}
           >
             <option value="">
@@ -309,7 +303,7 @@ export default function IVREntryScreen() {
                 ? 'Select branch first'
                 : loadingSalespersons
                   ? 'Loading advisors...'
-                  : 'Select sales advisor'}
+                  : 'Select sales advisor (optional)'}
             </option>
             {salespersons.map((person) => (
               <option key={person.id} value={person.id}>

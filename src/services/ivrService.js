@@ -1,7 +1,13 @@
 import { supabase } from './supabaseClient';
 
-const IVR_LEADS_TABLE = 'ivr_leads';
+const AI_LEADS_TABLE = 'ai_leads';
 
+/**
+ * Saves an IVR lead into ai_leads (lead_source = 'IVR').
+ * The lead appears in the Leads App AI tab for nurturing.
+ * Once "Open Green Form" is clicked there, it surfaces in the
+ * Reception App Green Form Queue as source_type = 'ivr'.
+ */
 export async function createIVRLead({
   customer_name,
   mobile_number,
@@ -11,15 +17,19 @@ export async function createIVRLead({
   remarks
 }) {
   const { data, error } = await supabase
-    .from(IVR_LEADS_TABLE)
+    .from(AI_LEADS_TABLE)
     .insert({
       customer_name,
       mobile_number,
       model_name,
-      salesperson_id,
+      salesperson_id: salesperson_id || null,
       location_id,
       remarks,
-      opty_status: 'pending'
+      lead_source: 'IVR',
+      lead_disposition: 'active',
+      opty_status: 'pending',
+      greenform_requested: false,
+      assigned_at: salesperson_id ? new Date().toISOString() : null
     })
     .select()
     .single();
@@ -30,8 +40,9 @@ export async function createIVRLead({
 
 export async function getIVRLeads() {
   const { data, error } = await supabase
-    .from(IVR_LEADS_TABLE)
+    .from(AI_LEADS_TABLE)
     .select('*')
+    .eq('lead_source', 'IVR')
     .order('created_at', { ascending: false });
 
   if (error) throw error;
