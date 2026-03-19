@@ -38,15 +38,40 @@ const BLANK_ROW_DATA = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function parseMobileNumbers(raw) {
-  return raw
-    .split(/[\n,;\s]+/)
-    .map((s) => s.replace(/\D/g, '').slice(0, 10))
-    .filter((s) => /^\d{10}$/.test(s));
-}
+/**
+ * Parses the paste input. Each line can be:
+ *   2026-03-19 9876543210   → callDate = '2026-03-19', mobile = '9876543210'
+ *   9876543210              → callDate = null,          mobile = '9876543210'
+ * Duplicates (by mobile number) are silently removed.
+ */
+function parseIVRLines(raw) {
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+  const MOBILE_RE = /^\d{10}$/;
+  const results = [];
+  const seen = new Set();
 
-function deduplicateNumbers(numbers) {
-  return [...new Set(numbers)];
+  for (const line of raw.split(/\n/)) {
+    const tokens = line.trim().split(/[\s,;]+/).filter(Boolean);
+    let callDate = null;
+    let mobile = null;
+
+    for (const token of tokens) {
+      if (!callDate && DATE_RE.test(token)) {
+        const d = new Date(token);
+        if (!isNaN(d.getTime())) callDate = token; // YYYY-MM-DD
+      } else if (!mobile) {
+        const digits = token.replace(/\D/g, '').slice(0, 10);
+        if (MOBILE_RE.test(digits)) mobile = digits;
+      }
+    }
+
+    if (mobile && !seen.has(mobile)) {
+      seen.add(mobile);
+      results.push({ mobile, callDate });
+    }
+  }
+
+  return results;
 }
 
 function getDisplayName(person) {
@@ -73,7 +98,7 @@ function getDateRange(filter) {
       end: new Date(now.getFullYear(), now.getMonth() + 1, 1),
     };
   }
-  return null; // all time — no date filter
+  return null;
 }
 
 function formatDateTime(value) {
@@ -84,6 +109,13 @@ function formatDateTime(value) {
     day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   });
+}
+
+function formatCallDate(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 function normalizeLeadSource(src) {
@@ -102,7 +134,7 @@ function normalizeOptyStatus(entry) {
 async function fetchIVREntries(dateFilter) {
   let query = supabase
     .from(AI_LEADS_TABLE)
-    .select('id, customer_name, mobile_number, model_name, salesperson_id, location_id, remarks, lead_source, opty_status, lead_disposition, created_at, updated_at')
+    .select('id, customer_name, mobile_number, model_name, salesperson_id, location_id, remarks, lead_source, opty_status, lead_disposition, call_datetime, created_at, updated_at')
     .eq('lead_source', 'IVR')
     .order('created_at', { ascending: false })
     .range(0, 9999); // override Supabase default page limit to fetch all rows
@@ -212,11 +244,16 @@ function AllEntriesRow({ entry, cars, locations, onSaved }) {
   };
 
   const { label: statusLabel, color: statusColor } = normalizeOptyStatus(entry);
+  const callDateDisplay = formatCallDate(entry.call_datetime);
 
   if (editing) {
     return (
       <tr className="bg-blue-50 border-b border-blue-100">
         <td className="px-3 py-2 text-xs text-slate-400 whitespace-nowrap">{formatDateTime(entry.created_at)}</td>
+        {/* Call date is read-only even in edit mode — it was set at import time */}
+        <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap">
+          {callDateDisplay || <span className="text-slate-300">—</span>}
+        </td>
         <td className="px-3 py-2">
           <input autoFocus type="text"
             className="kiosk-input !min-h-[34px] !py-1 !text-sm w-full"
@@ -283,6 +320,9 @@ function AllEntriesRow({ entry, cars, locations, onSaved }) {
   return (
     <tr className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
       <td className="px-3 py-2.5 text-xs text-slate-400 whitespace-nowrap">{formatDateTime(entry.created_at)}</td>
+      <td className="px-3 py-2.5 text-xs text-slate-600 whitespace-nowrap font-medium">
+        {callDateDisplay || <span className="text-slate-300">—</span>}
+      </td>
       <td className="px-3 py-2.5 text-sm text-slate-800">{entry.customer_name || <span className="text-slate-300">—</span>}</td>
       <td className="px-3 py-2.5 text-sm text-slate-700 font-mono">{entry.mobile_number}</td>
       <td className="px-3 py-2.5 text-sm text-slate-700">{entry.model_name || <span className="text-slate-300">—</span>}</td>
@@ -388,10 +428,11 @@ function AllEntriesTab({ cars, locations }) {
         </div>
       ) : (
         <div className="overflow-x-auto rounded-2xl border border-slate-200">
-          <table className="walkin-table !mt-0 min-w-[1000px]">
+          <table className="walkin-table !mt-0 min-w-[1100px]">
             <thead className="bg-slate-50">
               <tr>
-                <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left whitespace-nowrap">Date &amp; Time</th>
+                <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left whitespace-nowrap">Entry Date</th>
+                <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left whitespace-nowrap">Call Date</th>
                 <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Customer Name</th>
                 <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Mobile</th>
                 <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Model</th>
@@ -483,6 +524,10 @@ function IVRRow({
       <tr className={`border-b border-slate-100 transition-colors ${rowBg}`} onKeyDown={handleRowKeyDown}>
         <td className="px-3 py-2 text-xs text-slate-400 font-mono w-8">{row.index + 1}</td>
         <td className="px-3 py-2 text-sm font-semibold text-slate-800 w-36">{row.mobile}</td>
+        {/* Call Date — parsed from the pasted input */}
+        <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap w-28">
+          {row.callDate || <span className="text-slate-300">—</span>}
+        </td>
         <td className="px-3 py-2 w-28">
           {row.status === STATUS.SAVED && <span className="text-[11px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-semibold">✓ Saved</span>}
           {row.status === STATUS.UNINTERESTED && <span className="text-[11px] px-2 py-0.5 rounded-full bg-red-100 text-red-600 font-semibold">Uninterested</span>}
@@ -531,7 +576,7 @@ function IVRRow({
 
       {expanded && !isDone && (
         <tr className="bg-slate-50 border-b border-slate-200">
-          <td colSpan={5} className="px-4 py-3">
+          <td colSpan={6} className="px-4 py-3">
             <p className="text-[11px] text-slate-400 mb-2.5">
               <kbd className="bg-white border border-slate-200 rounded px-1 font-mono">Enter</kbd> next &nbsp;·&nbsp;
               <kbd className="bg-white border border-slate-200 rounded px-1 font-mono">↑↓</kbd> dropdown &nbsp;·&nbsp;
@@ -623,15 +668,16 @@ export default function IVREntryScreen() {
 
   const handleImport = () => {
     setImportError('');
-    const numbers = deduplicateNumbers(parseMobileNumbers(rawInput));
-    if (numbers.length === 0) {
+    const parsed = parseIVRLines(rawInput);
+    if (parsed.length === 0) {
       setImportError('No valid 10-digit mobile numbers found. Please check your input.');
       return;
     }
-    const newRows = numbers.map((mobile, index) => ({
+    const newRows = parsed.map(({ mobile, callDate }, index) => ({
       id: `${mobile}-${index}`,
       index,
       mobile,
+      callDate,   // YYYY-MM-DD or null
       status: STATUS.PENDING,
       savedSummary: null,
       errorMessage: null,
@@ -683,6 +729,7 @@ export default function IVREntryScreen() {
         salesperson_id: data.salespersonId || null,
         location_id: data.locationId || null,
         remarks: data.remarks.trim() || null,
+        call_datetime: row.callDate ? new Date(row.callDate).toISOString() : null,
       });
       const parts = [];
       if (data.customerName.trim()) parts.push(data.customerName.trim());
@@ -735,11 +782,11 @@ export default function IVREntryScreen() {
             <label className="block text-lg font-semibold text-slate-700">
               Paste Mobile Numbers
               <p className="mt-0.5 text-sm font-normal text-slate-500">
-                One per line, or separated by commas or spaces. Duplicates removed automatically.
+                Format: <code className="bg-slate-100 rounded px-1 font-mono text-xs">YYYY-MM-DD 9876543210</code> — date is optional. One entry per line. Duplicates removed automatically.
               </p>
               <textarea
                 className="kiosk-input mt-2 min-h-[200px] font-mono text-base"
-                placeholder={"9876543210\n9123456789\n9000000001"}
+                placeholder={"2026-03-19 9876543210\n2026-03-19 9123456789\n9000000001"}
                 value={rawInput}
                 onChange={(e) => { setRawInput(e.target.value); setImportError(''); }}
                 onKeyDown={(e) => {
@@ -789,6 +836,7 @@ export default function IVREntryScreen() {
                   <tr>
                     <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 w-8">#</th>
                     <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Mobile</th>
+                    <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Call Date</th>
                     <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Status</th>
                     <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Details</th>
                     <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-right">Actions</th>

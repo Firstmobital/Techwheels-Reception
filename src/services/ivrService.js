@@ -14,7 +14,8 @@ export async function createIVRLead({
   model_name,
   salesperson_id,
   location_id,
-  remarks
+  remarks,
+  call_datetime,   // ISO string or null — date/time of the original IVR call
 }) {
   const { data, error } = await supabase
     .from(AI_LEADS_TABLE)
@@ -25,11 +26,12 @@ export async function createIVRLead({
       salesperson_id: salesperson_id || null,
       location_id,
       remarks,
+      call_datetime: call_datetime || null,
       lead_source: 'IVR',
       lead_disposition: 'active',
       opty_status: 'pending',
       greenform_requested: false,
-      assigned_at: salesperson_id ? new Date().toISOString() : null
+      assigned_at: salesperson_id ? new Date().toISOString() : null,
     })
     .select()
     .single();
