@@ -9,7 +9,6 @@ import {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function parseMobileNumbers(raw) {
-  // Split on newlines, commas, semicolons, or spaces; keep only 10-digit numbers
   return raw
     .split(/[\n,;\s]+/)
     .map((s) => s.replace(/\D/g, '').slice(0, 10))
@@ -34,13 +33,12 @@ const BLANK_ROW_DATA = {
   remarks: '',
 };
 
-// Status constants
 const STATUS = {
-  PENDING: 'pending',       // not yet acted on
-  SAVING: 'saving',         // save in progress
-  SAVED: 'saved',           // saved to ai_leads
-  UNINTERESTED: 'uninterested', // marked uninterested
-  ERROR: 'error',           // save failed
+  PENDING: 'pending',
+  SAVING: 'saving',
+  SAVED: 'saved',
+  UNINTERESTED: 'uninterested',
+  ERROR: 'error',
 };
 
 // ─── Row component ───────────────────────────────────────────────────────────
@@ -57,9 +55,8 @@ function IVRRow({
   const [data, setData] = useState(BLANK_ROW_DATA);
   const [salespersons, setSalespersons] = useState([]);
   const [loadingSP, setLoadingSP] = useState(false);
-  const [expanded, setExpanded] = useState(false); // show detail fields
+  const [expanded, setExpanded] = useState(false);
 
-  // Load salespersons when branch changes
   useEffect(() => {
     let mounted = true;
     if (!data.locationId) {
@@ -82,13 +79,9 @@ function IVRRow({
 
   const set = (field, value) => setData((prev) => ({ ...prev, [field]: value }));
 
-  const isDone =
-    row.status === STATUS.SAVED ||
-    row.status === STATUS.UNINTERESTED;
-
+  const isDone = row.status === STATUS.SAVED || row.status === STATUS.UNINTERESTED;
   const isSaving = row.status === STATUS.SAVING;
 
-  // Row background by status
   const rowBg =
     row.status === STATUS.SAVED ? 'bg-green-50' :
     row.status === STATUS.UNINTERESTED ? 'bg-red-50 opacity-60' :
@@ -97,49 +90,50 @@ function IVRRow({
 
   return (
     <tbody>
-      {/* Main row */}
+      {/* Main row — kept compact */}
       <tr className={`border-b border-slate-100 transition-colors ${rowBg}`}>
+
         {/* # */}
-        <td className="px-3 py-3 text-sm text-slate-400 font-mono w-8">
+        <td className="px-3 py-2 text-xs text-slate-400 font-mono w-8">
           {row.index + 1}
         </td>
 
         {/* Mobile */}
-        <td className="px-3 py-3 text-sm font-semibold text-slate-800 w-36">
+        <td className="px-3 py-2 text-sm font-semibold text-slate-800 w-36">
           {row.mobile}
         </td>
 
         {/* Status badge */}
-        <td className="px-3 py-3 w-28">
+        <td className="px-3 py-2 w-28">
           {row.status === STATUS.SAVED && (
-            <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-700 font-semibold">
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-semibold">
               ✓ Saved
             </span>
           )}
           {row.status === STATUS.UNINTERESTED && (
-            <span className="text-xs px-2 py-1 rounded-full bg-red-100 text-red-600 font-semibold">
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-red-100 text-red-600 font-semibold">
               Uninterested
             </span>
           )}
           {row.status === STATUS.ERROR && (
-            <span className="text-xs px-2 py-1 rounded-full bg-yellow-100 text-yellow-700 font-semibold">
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 font-semibold">
               Error
             </span>
           )}
           {row.status === STATUS.PENDING && (
-            <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-500">
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
               Pending
             </span>
           )}
           {row.status === STATUS.SAVING && (
-            <span className="text-xs px-2 py-1 rounded-full bg-blue-100 text-blue-600 animate-pulse">
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-600 animate-pulse">
               Saving…
             </span>
           )}
         </td>
 
-        {/* Summary of filled details (when saved) */}
-        <td className="px-3 py-3 text-xs text-slate-500">
+        {/* Saved summary / error */}
+        <td className="px-3 py-2 text-xs text-slate-500">
           {row.status === STATUS.SAVED && row.savedSummary ? (
             <span>{row.savedSummary}</span>
           ) : row.status === STATUS.ERROR ? (
@@ -147,15 +141,14 @@ function IVRRow({
           ) : null}
         </td>
 
-        {/* Actions */}
-        <td className="px-3 py-3 text-right whitespace-nowrap">
+        {/* Actions — small pill buttons */}
+        <td className="px-3 py-2 text-right whitespace-nowrap">
           {!isDone && (
-            <div className="flex items-center justify-end gap-2">
-              {/* Expand / Interested */}
+            <div className="flex items-center justify-end gap-1.5">
               {!expanded ? (
                 <button
                   type="button"
-                  className="btn btn-primary text-xs px-3 py-2 rounded-xl h-auto min-h-0"
+                  className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
                   onClick={() => setExpanded(true)}
                   disabled={isSaving}
                 >
@@ -164,7 +157,7 @@ function IVRRow({
               ) : (
                 <button
                   type="button"
-                  className="btn btn-primary text-xs px-3 py-2 rounded-xl h-auto min-h-0"
+                  className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
                   onClick={() => onSaveInterested(row.id, data)}
                   disabled={isSaving}
                 >
@@ -174,7 +167,7 @@ function IVRRow({
 
               <button
                 type="button"
-                className="btn text-xs px-3 py-2 rounded-xl h-auto min-h-0 border border-red-200 text-red-600 bg-white hover:bg-red-50"
+                className="text-[11px] px-2.5 py-1 rounded-lg border border-red-200 text-red-600 bg-white font-semibold hover:bg-red-50 transition-colors disabled:opacity-50"
                 onClick={() => onMarkUninterested(row.id)}
                 disabled={isSaving}
               >
@@ -184,7 +177,7 @@ function IVRRow({
               {expanded && (
                 <button
                   type="button"
-                  className="text-xs text-slate-400 underline"
+                  className="text-[11px] text-slate-400 underline ml-0.5"
                   onClick={() => setExpanded(false)}
                 >
                   Cancel
@@ -195,18 +188,18 @@ function IVRRow({
         </td>
       </tr>
 
-      {/* Expanded detail row — only shown when "Interested" is clicked */}
+      {/* Expanded detail row */}
       {expanded && !isDone && (
         <tr className="bg-slate-50 border-b border-slate-200">
-          <td colSpan={5} className="px-4 py-4">
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
+          <td colSpan={5} className="px-4 py-3">
+            <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 lg:grid-cols-5">
 
               {/* Customer Name */}
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
                 Customer Name
                 <input
                   type="text"
-                  className="kiosk-input !min-h-[40px] !py-2 !text-sm"
+                  className="kiosk-input !min-h-[36px] !py-1.5 !text-sm"
                   placeholder="Optional"
                   value={data.customerName}
                   onChange={(e) => set('customerName', e.target.value)}
@@ -217,7 +210,7 @@ function IVRRow({
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
                 Model
                 <select
-                  className="kiosk-select !min-h-[40px] !py-2 !text-sm"
+                  className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
                   value={data.modelName}
                   onChange={(e) => set('modelName', e.target.value)}
                   disabled={loadingCars}
@@ -229,33 +222,33 @@ function IVRRow({
                 </select>
               </label>
 
-              {/* Branch */}
+              {/* Branch — optional */}
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
-                Branch
+                Branch <span className="font-normal text-slate-400">(optional)</span>
                 <select
-                  className="kiosk-select !min-h-[40px] !py-2 !text-sm"
+                  className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
                   value={data.locationId}
                   onChange={(e) => set('locationId', e.target.value)}
                   disabled={loadingLocations}
                 >
-                  <option value="">{loadingLocations ? 'Loading…' : 'Optional'}</option>
+                  <option value="">{loadingLocations ? 'Loading…' : 'Select branch'}</option>
                   {locations.map((loc) => (
                     <option key={loc.id} value={loc.id}>{loc.name || `Branch #${loc.id}`}</option>
                   ))}
                 </select>
               </label>
 
-              {/* Sales Advisor */}
+              {/* Sales Advisor — optional, depends on branch */}
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
-                Sales Advisor
+                Sales Advisor <span className="font-normal text-slate-400">(optional)</span>
                 <select
-                  className="kiosk-select !min-h-[40px] !py-2 !text-sm"
+                  className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
                   value={data.salespersonId}
                   onChange={(e) => set('salespersonId', e.target.value)}
                   disabled={!data.locationId || loadingSP}
                 >
                   <option value="">
-                    {!data.locationId ? 'Select branch first' : loadingSP ? 'Loading…' : 'Optional'}
+                    {!data.locationId ? 'Select branch first' : loadingSP ? 'Loading…' : 'Select advisor'}
                   </option>
                   {salespersons.map((sp) => (
                     <option key={sp.id} value={sp.id}>{getDisplayName(sp)}</option>
@@ -268,7 +261,7 @@ function IVRRow({
                 Remarks
                 <input
                   type="text"
-                  className="kiosk-input !min-h-[40px] !py-2 !text-sm"
+                  className="kiosk-input !min-h-[36px] !py-1.5 !text-sm"
                   placeholder="Optional call notes"
                   value={data.remarks}
                   onChange={(e) => set('remarks', e.target.value)}
@@ -286,21 +279,16 @@ function IVRRow({
 // ─── Main Screen ─────────────────────────────────────────────────────────────
 
 export default function IVREntryScreen() {
-  // Phase 1 — import
   const [rawInput, setRawInput] = useState('');
   const [importError, setImportError] = useState('');
-
-  // Phase 2 — table
-  const [rows, setRows] = useState([]); // { id, index, mobile, status, savedSummary, errorMessage }
+  const [rows, setRows] = useState([]);
   const [hasImported, setHasImported] = useState(false);
 
-  // Shared data
   const [cars, setCars] = useState([]);
   const [locations, setLocations] = useState([]);
   const [loadingCars, setLoadingCars] = useState(true);
   const [loadingLocations, setLoadingLocations] = useState(true);
 
-  // Load cars and locations once
   useEffect(() => {
     let mounted = true;
     getAvailableCars()
@@ -318,8 +306,6 @@ export default function IVREntryScreen() {
       .finally(() => { if (mounted) setLoadingLocations(false); });
     return () => { mounted = false; };
   }, []);
-
-  // ── Phase 1: Parse and import numbers ──────────────────────────────────────
 
   const handleImport = () => {
     setImportError('');
@@ -348,8 +334,6 @@ export default function IVREntryScreen() {
     setImportError('');
   };
 
-  // ── Phase 2: Row actions ───────────────────────────────────────────────────
-
   const setRowStatus = useCallback((rowId, status, extra = {}) => {
     setRows((prev) =>
       prev.map((r) => r.id === rowId ? { ...r, status, ...extra } : r)
@@ -376,7 +360,6 @@ export default function IVREntryScreen() {
         remarks: data.remarks.trim() || null,
       });
 
-      // Build a short summary for the saved row
       const parts = [];
       if (data.customerName.trim()) parts.push(data.customerName.trim());
       if (data.modelName) parts.push(data.modelName);
@@ -391,8 +374,6 @@ export default function IVREntryScreen() {
     }
   }, [rows, setRowStatus]);
 
-  // ── Counters ───────────────────────────────────────────────────────────────
-
   const counts = rows.reduce(
     (acc, r) => {
       if (r.status === STATUS.SAVED) acc.saved++;
@@ -403,8 +384,6 @@ export default function IVREntryScreen() {
     { saved: 0, uninterested: 0, pending: 0 }
   );
 
-  // ── Render ─────────────────────────────────────────────────────────────────
-
   return (
     <section className="kiosk-card mx-auto w-full rounded-2xl p-6 shadow-lg" style={{ maxWidth: '1100px' }}>
       <h1 className="kiosk-title !mb-1 text-4xl">IVR Lead Entry</h1>
@@ -412,7 +391,7 @@ export default function IVREntryScreen() {
         Paste mobile numbers, then mark each as Interested or Uninterested.
       </p>
 
-      {/* ── Phase 1: Import panel ── */}
+      {/* Phase 1: Import */}
       {!hasImported ? (
         <div className="space-y-4">
           <label className="block text-lg font-semibold text-slate-700">
@@ -445,12 +424,12 @@ export default function IVREntryScreen() {
           </div>
         </div>
       ) : (
-        /* ── Phase 2: Table ── */
+        /* Phase 2: Table */
         <div className="space-y-4">
 
           {/* Summary bar */}
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex gap-3 text-sm">
+            <div className="flex flex-wrap gap-2 text-sm">
               <span className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-600 font-semibold">
                 Total: {rows.length}
               </span>
@@ -466,7 +445,7 @@ export default function IVREntryScreen() {
             </div>
             <button
               type="button"
-              className="btn btn-secondary text-sm px-4 h-10 rounded-xl"
+              className="btn border border-slate-300 text-slate-600 bg-white hover:bg-slate-50 text-sm px-4 h-10 rounded-xl"
               onClick={handleReset}
             >
               ← New Import
@@ -478,11 +457,11 @@ export default function IVREntryScreen() {
             <table className="walkin-table !mt-0">
               <thead className="bg-slate-50">
                 <tr>
-                  <th className="px-3 py-3 text-xs font-semibold text-slate-500 w-8">#</th>
-                  <th className="px-3 py-3 text-xs font-semibold text-slate-500 text-left">Mobile</th>
-                  <th className="px-3 py-3 text-xs font-semibold text-slate-500 text-left">Status</th>
-                  <th className="px-3 py-3 text-xs font-semibold text-slate-500 text-left">Details</th>
-                  <th className="px-3 py-3 text-xs font-semibold text-slate-500 text-right">Actions</th>
+                  <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 w-8">#</th>
+                  <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Mobile</th>
+                  <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Status</th>
+                  <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Details</th>
+                  <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-right">Actions</th>
                 </tr>
               </thead>
               {rows.map((row) => (
