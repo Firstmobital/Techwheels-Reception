@@ -1,30 +1,30 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { createIVRLead } from '../../services/ivrService';
 import {
   getAvailableCars,
   getLocations,
   getSalesPersonsByLocation
 } from '../../services/walkinService';
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
+ 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+ 
 function parseMobileNumbers(raw) {
   return raw
     .split(/[\n,;\s]+/)
     .map((s) => s.replace(/\D/g, '').slice(0, 10))
     .filter((s) => /^\d{10}$/.test(s));
 }
-
+ 
 function deduplicateNumbers(numbers) {
   return [...new Set(numbers)];
 }
-
+ 
 function getDisplayName(person) {
   const first = person?.first_name?.trim() || '';
   const last = person?.last_name?.trim() || '';
   return `${first} ${last}`.trim() || 'Unnamed advisor';
 }
-
+ 
 const BLANK_ROW_DATA = {
   customerName: '',
   modelName: '',
@@ -32,7 +32,7 @@ const BLANK_ROW_DATA = {
   salespersonId: '',
   remarks: '',
 };
-
+ 
 const STATUS = {
   PENDING: 'pending',
   SAVING: 'saving',
@@ -40,9 +40,9 @@ const STATUS = {
   UNINTERESTED: 'uninterested',
   ERROR: 'error',
 };
-
-// ─── Row component ───────────────────────────────────────────────────────────
-
+ 
+// ─── Row component ────────────────────────────────────────────────────────────
+ 
 function IVRRow({
   row,
   cars,
@@ -51,12 +51,22 @@ function IVRRow({
   loadingLocations,
   onMarkUninterested,
   onSaveInterested,
+  onFocusNext,           // () => void — called after save/uninterested to move focus
+  interestedBtnRef,      // callback ref so parent can imperatively focus this button
 }) {
   const [data, setData] = useState(BLANK_ROW_DATA);
   const [salespersons, setSalespersons] = useState([]);
   const [loadingSP, setLoadingSP] = useState(false);
   const [expanded, setExpanded] = useState(false);
-
+ 
+  // Refs for each detail field — used to chain Enter key between them
+  const customerNameRef = useRef(null);
+  const modelRef = useRef(null);
+  const branchRef = useRef(null);
+  const advisorRef = useRef(null);
+  const remarksRef = useRef(null);
+ 
+  // Load salespersons when branch changes
   useEffect(() => {
     let mounted = true;
     if (!data.locationId) {
@@ -76,33 +86,69 @@ function IVRRow({
       .finally(() => { if (mounted) setLoadingSP(false); });
     return () => { mounted = false; };
   }, [data.locationId]);
-
+ 
   const set = (field, value) => setData((prev) => ({ ...prev, [field]: value }));
-
+ 
   const isDone = row.status === STATUS.SAVED || row.status === STATUS.UNINTERESTED;
   const isSaving = row.status === STATUS.SAVING;
-
+ 
   const rowBg =
     row.status === STATUS.SAVED ? 'bg-green-50' :
     row.status === STATUS.UNINTERESTED ? 'bg-red-50 opacity-60' :
     row.status === STATUS.ERROR ? 'bg-yellow-50' :
     'bg-white';
-
+ 
+  // Save this row then move focus to next pending row
+  const handleSave = useCallback(async () => {
+    await onSaveInterested(row.id, data);
+    onFocusNext();
+  }, [row.id, data, onSaveInterested, onFocusNext]);
+ 
+  // U key on the row = mark uninterested + move to next
+  const handleRowKeyDown = useCallback((e) => {
+    if (isDone || isSaving) return;
+    if (e.key === 'u' || e.key === 'U') {
+      // Don't fire if user is typing in a text input
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      e.preventDefault();
+      onMarkUninterested(row.id);
+      onFocusNext();
+    }
+  }, [isDone, isSaving, onMarkUninterested, onFocusNext, row.id]);
+ 
+  // Enter on a text input moves to the next field ref provided
+  const chainEnter = (e, nextRef) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      nextRef?.current?.focus();
+    }
+  };
+ 
+  // Enter on Remarks = save
+  const handleRemarksKeyDown = useCallback((e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSave();
+    }
+  }, [handleSave]);
+ 
   return (
     <tbody>
-      {/* Main row — kept compact */}
-      <tr className={`border-b border-slate-100 transition-colors ${rowBg}`}>
-
+      {/* Main row */}
+      <tr
+        className={`border-b border-slate-100 transition-colors ${rowBg}`}
+        onKeyDown={handleRowKeyDown}
+      >
         {/* # */}
         <td className="px-3 py-2 text-xs text-slate-400 font-mono w-8">
           {row.index + 1}
         </td>
-
+ 
         {/* Mobile */}
         <td className="px-3 py-2 text-sm font-semibold text-slate-800 w-36">
           {row.mobile}
         </td>
-
+ 
         {/* Status badge */}
         <td className="px-3 py-2 w-28">
           {row.status === STATUS.SAVED && (
@@ -131,8 +177,8 @@ function IVRRow({
             </span>
           )}
         </td>
-
-        {/* Saved summary / error */}
+ 
+        {/* Saved summary / error message */}
         <td className="px-3 py-2 text-xs text-slate-500">
           {row.status === STATUS.SAVED && row.savedSummary ? (
             <span>{row.savedSummary}</span>
@@ -140,17 +186,23 @@ function IVRRow({
             <span className="text-yellow-700">{row.errorMessage}</span>
           ) : null}
         </td>
-
-        {/* Actions — small pill buttons */}
+ 
+        {/* Action buttons */}
         <td className="px-3 py-2 text-right whitespace-nowrap">
           {!isDone && (
             <div className="flex items-center justify-end gap-1.5">
               {!expanded ? (
                 <button
+                  ref={interestedBtnRef}
                   type="button"
                   className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
-                  onClick={() => setExpanded(true)}
+                  onClick={() => {
+                    setExpanded(true);
+                    // Auto-focus first detail field after expand
+                    setTimeout(() => customerNameRef.current?.focus(), 50);
+                  }}
                   disabled={isSaving}
+                  title="Enter/Space to expand · U to mark Uninterested"
                 >
                   Interested
                 </button>
@@ -158,22 +210,23 @@ function IVRRow({
                 <button
                   type="button"
                   className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
-                  onClick={() => onSaveInterested(row.id, data)}
+                  onClick={handleSave}
                   disabled={isSaving}
                 >
                   {isSaving ? 'Saving…' : 'Save'}
                 </button>
               )}
-
+ 
               <button
                 type="button"
                 className="text-[11px] px-2.5 py-1 rounded-lg border border-red-200 text-red-600 bg-white font-semibold hover:bg-red-50 transition-colors disabled:opacity-50"
-                onClick={() => onMarkUninterested(row.id)}
+                onClick={() => { onMarkUninterested(row.id); onFocusNext(); }}
                 disabled={isSaving}
+                title="U key shortcut"
               >
                 Uninterested
               </button>
-
+ 
               {expanded && (
                 <button
                   type="button"
@@ -187,33 +240,49 @@ function IVRRow({
           )}
         </td>
       </tr>
-
+ 
       {/* Expanded detail row */}
       {expanded && !isDone && (
         <tr className="bg-slate-50 border-b border-slate-200">
           <td colSpan={5} className="px-4 py-3">
+            <p className="text-[11px] text-slate-400 mb-2.5">
+              <kbd className="bg-white border border-slate-200 rounded px-1 font-mono">Enter</kbd> moves to next field &nbsp;·&nbsp;
+              <kbd className="bg-white border border-slate-200 rounded px-1 font-mono">↑ ↓</kbd> navigate dropdowns &nbsp;·&nbsp;
+              <kbd className="bg-white border border-slate-200 rounded px-1 font-mono">Enter</kbd> on Remarks saves &nbsp;·&nbsp;
+              <kbd className="bg-white border border-slate-200 rounded px-1 font-mono">U</kbd> marks Uninterested
+            </p>
             <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 lg:grid-cols-5">
-
-              {/* Customer Name */}
+ 
+              {/* 1. Customer Name → Enter → Model */}
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
                 Customer Name
                 <input
+                  ref={customerNameRef}
                   type="text"
                   className="kiosk-input !min-h-[36px] !py-1.5 !text-sm"
                   placeholder="Optional"
                   value={data.customerName}
                   onChange={(e) => set('customerName', e.target.value)}
+                  onKeyDown={(e) => chainEnter(e, modelRef)}
                 />
               </label>
-
-              {/* Model */}
+ 
+              {/* 2. Model dropdown — Tab moves to Branch naturally */}
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
                 Model
                 <select
+                  ref={modelRef}
                   className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
                   value={data.modelName}
                   onChange={(e) => set('modelName', e.target.value)}
                   disabled={loadingCars}
+                  onKeyDown={(e) => {
+                    // Tab handled by browser; Enter on a select either opens or confirms —
+                    // we only forward to next field when Tab is pressed with a value already selected
+                    if (e.key === 'Tab' && !e.shiftKey) {
+                      // let browser handle naturally — Branch is next in DOM
+                    }
+                  }}
                 >
                   <option value="">{loadingCars ? 'Loading…' : 'Optional'}</option>
                   {cars.map((car) => (
@@ -221,11 +290,12 @@ function IVRRow({
                   ))}
                 </select>
               </label>
-
-              {/* Branch — optional */}
+ 
+              {/* 3. Branch dropdown — Tab moves to Advisor */}
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
                 Branch <span className="font-normal text-slate-400">(optional)</span>
                 <select
+                  ref={branchRef}
                   className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
                   value={data.locationId}
                   onChange={(e) => set('locationId', e.target.value)}
@@ -237,11 +307,12 @@ function IVRRow({
                   ))}
                 </select>
               </label>
-
-              {/* Sales Advisor — optional, depends on branch */}
+ 
+              {/* 4. Sales Advisor dropdown — Tab moves to Remarks */}
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
                 Sales Advisor <span className="font-normal text-slate-400">(optional)</span>
                 <select
+                  ref={advisorRef}
                   className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
                   value={data.salespersonId}
                   onChange={(e) => set('salespersonId', e.target.value)}
@@ -255,19 +326,21 @@ function IVRRow({
                   ))}
                 </select>
               </label>
-
-              {/* Remarks */}
+ 
+              {/* 5. Remarks — Enter saves */}
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600 col-span-2 md:col-span-1">
                 Remarks
                 <input
+                  ref={remarksRef}
                   type="text"
                   className="kiosk-input !min-h-[36px] !py-1.5 !text-sm"
-                  placeholder="Optional call notes"
+                  placeholder="Optional · Enter to save"
                   value={data.remarks}
                   onChange={(e) => set('remarks', e.target.value)}
+                  onKeyDown={handleRemarksKeyDown}
                 />
               </label>
-
+ 
             </div>
           </td>
         </tr>
@@ -275,20 +348,24 @@ function IVRRow({
     </tbody>
   );
 }
-
-// ─── Main Screen ─────────────────────────────────────────────────────────────
-
+ 
+// ─── Main Screen ──────────────────────────────────────────────────────────────
+ 
 export default function IVREntryScreen() {
   const [rawInput, setRawInput] = useState('');
   const [importError, setImportError] = useState('');
   const [rows, setRows] = useState([]);
   const [hasImported, setHasImported] = useState(false);
-
+ 
   const [cars, setCars] = useState([]);
   const [locations, setLocations] = useState([]);
   const [loadingCars, setLoadingCars] = useState(true);
   const [loadingLocations, setLoadingLocations] = useState(true);
-
+ 
+  // Map of rowId → DOM ref for each row's Interested button
+  // Stored in a ref (not state) so updates don't cause re-renders
+  const interestedBtnRefs = useRef({});
+ 
   useEffect(() => {
     let mounted = true;
     getAvailableCars()
@@ -297,7 +374,7 @@ export default function IVREntryScreen() {
       .finally(() => { if (mounted) setLoadingCars(false); });
     return () => { mounted = false; };
   }, []);
-
+ 
   useEffect(() => {
     let mounted = true;
     getLocations()
@@ -306,7 +383,7 @@ export default function IVREntryScreen() {
       .finally(() => { if (mounted) setLoadingLocations(false); });
     return () => { mounted = false; };
   }, []);
-
+ 
   const handleImport = () => {
     setImportError('');
     const numbers = deduplicateNumbers(parseMobileNumbers(rawInput));
@@ -314,42 +391,64 @@ export default function IVREntryScreen() {
       setImportError('No valid 10-digit mobile numbers found. Please check your input.');
       return;
     }
-    setRows(
-      numbers.map((mobile, index) => ({
-        id: `${mobile}-${index}`,
-        index,
-        mobile,
-        status: STATUS.PENDING,
-        savedSummary: null,
-        errorMessage: null,
-      }))
-    );
+    const newRows = numbers.map((mobile, index) => ({
+      id: `${mobile}-${index}`,
+      index,
+      mobile,
+      status: STATUS.PENDING,
+      savedSummary: null,
+      errorMessage: null,
+    }));
+    setRows(newRows);
     setHasImported(true);
+    // Auto-focus the first row's Interested button once rendered
+    setTimeout(() => {
+      const firstId = newRows[0]?.id;
+      if (firstId) interestedBtnRefs.current[firstId]?.focus();
+    }, 100);
   };
-
+ 
   const handleReset = () => {
     setRows([]);
     setRawInput('');
     setHasImported(false);
     setImportError('');
+    interestedBtnRefs.current = {};
   };
-
+ 
   const setRowStatus = useCallback((rowId, status, extra = {}) => {
     setRows((prev) =>
       prev.map((r) => r.id === rowId ? { ...r, status, ...extra } : r)
     );
   }, []);
-
+ 
+  // After a row is actioned, focus the next pending row's Interested button
+  const focusNextPendingRow = useCallback((afterRowId) => {
+    // Read latest rows via functional updater to avoid stale closure
+    setRows((currentRows) => {
+      const afterIndex = currentRows.findIndex((r) => r.id === afterRowId);
+      const nextPending = currentRows.find(
+        (r, i) => i > afterIndex && r.status === STATUS.PENDING
+      );
+      if (nextPending) {
+        setTimeout(() => {
+          interestedBtnRefs.current[nextPending.id]?.focus();
+        }, 60);
+      }
+      return currentRows; // no state change, just reading
+    });
+  }, []);
+ 
   const handleMarkUninterested = useCallback((rowId) => {
     setRowStatus(rowId, STATUS.UNINTERESTED);
   }, [setRowStatus]);
-
+ 
   const handleSaveInterested = useCallback(async (rowId, data) => {
     const row = rows.find((r) => r.id === rowId);
     if (!row) return;
-
+ 
     setRowStatus(rowId, STATUS.SAVING);
-
+ 
     try {
       await createIVRLead({
         customer_name: data.customerName.trim() || null,
@@ -359,13 +458,13 @@ export default function IVREntryScreen() {
         location_id: data.locationId || null,
         remarks: data.remarks.trim() || null,
       });
-
+ 
       const parts = [];
       if (data.customerName.trim()) parts.push(data.customerName.trim());
       if (data.modelName) parts.push(data.modelName);
       if (data.remarks.trim()) parts.push(`"${data.remarks.trim()}"`);
       const savedSummary = parts.join(' · ') || 'Saved to AI queue';
-
+ 
       setRowStatus(rowId, STATUS.SAVED, { savedSummary });
     } catch (error) {
       setRowStatus(rowId, STATUS.ERROR, {
@@ -373,7 +472,7 @@ export default function IVREntryScreen() {
       });
     }
   }, [rows, setRowStatus]);
-
+ 
   const counts = rows.reduce(
     (acc, r) => {
       if (r.status === STATUS.SAVED) acc.saved++;
@@ -383,14 +482,14 @@ export default function IVREntryScreen() {
     },
     { saved: 0, uninterested: 0, pending: 0 }
   );
-
+ 
   return (
     <section className="kiosk-card mx-auto w-full rounded-2xl p-6 shadow-lg" style={{ maxWidth: '1100px' }}>
       <h1 className="kiosk-title !mb-1 text-4xl">IVR Lead Entry</h1>
       <p className="mb-5 text-base text-slate-600">
         Paste mobile numbers, then mark each as Interested or Uninterested.
       </p>
-
+ 
       {/* Phase 1: Import */}
       {!hasImported ? (
         <div className="space-y-4">
@@ -407,12 +506,21 @@ export default function IVREntryScreen() {
                 setRawInput(e.target.value);
                 setImportError('');
               }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                  e.preventDefault();
+                  if (rawInput.trim()) handleImport();
+                }
+              }}
             />
           </label>
-
+ 
           {importError && <p className="error-text">{importError}</p>}
-
-          <div className="flex justify-end">
+ 
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-slate-400">
+              Tip: <kbd className="bg-slate-100 border border-slate-200 rounded px-1 font-mono">Ctrl+Enter</kbd> to import
+            </p>
             <button
               type="button"
               className="btn btn-primary px-8 h-14 rounded-2xl text-lg"
@@ -425,8 +533,17 @@ export default function IVREntryScreen() {
         </div>
       ) : (
         /* Phase 2: Table */
-        <div className="space-y-4">
-
+        <div className="space-y-3">
+ 
+          {/* Keyboard legend */}
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-slate-500 bg-slate-50 rounded-xl px-4 py-2.5 border border-slate-200">
+            <span><kbd className="bg-white border border-slate-300 rounded px-1.5 py-0.5 font-mono text-[10px]">Enter</kbd> · next field</span>
+            <span><kbd className="bg-white border border-slate-300 rounded px-1.5 py-0.5 font-mono text-[10px]">Tab</kbd> · move forward</span>
+            <span><kbd className="bg-white border border-slate-300 rounded px-1.5 py-0.5 font-mono text-[10px]">↑ ↓</kbd> · dropdown options</span>
+            <span><kbd className="bg-white border border-slate-300 rounded px-1.5 py-0.5 font-mono text-[10px]">U</kbd> · Uninterested</span>
+            <span><kbd className="bg-white border border-slate-300 rounded px-1.5 py-0.5 font-mono text-[10px]">Enter</kbd> on Remarks · Save &amp; next row</span>
+          </div>
+ 
           {/* Summary bar */}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap gap-2 text-sm">
@@ -451,7 +568,7 @@ export default function IVREntryScreen() {
               ← New Import
             </button>
           </div>
-
+ 
           {/* Table */}
           <div className="overflow-x-auto rounded-2xl border border-slate-200">
             <table className="walkin-table !mt-0">
@@ -474,11 +591,16 @@ export default function IVREntryScreen() {
                   loadingLocations={loadingLocations}
                   onMarkUninterested={handleMarkUninterested}
                   onSaveInterested={handleSaveInterested}
+                  onFocusNext={() => focusNextPendingRow(row.id)}
+                  interestedBtnRef={(el) => {
+                    if (el) interestedBtnRefs.current[row.id] = el;
+                    else delete interestedBtnRefs.current[row.id];
+                  }}
                 />
               ))}
             </table>
           </div>
-
+ 
         </div>
       )}
     </section>
