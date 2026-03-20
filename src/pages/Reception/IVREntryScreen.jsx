@@ -740,9 +740,11 @@ export default function IVREntryScreen() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Only accept CSV (Excel users should save as CSV)
-    if (!file.name.endsWith('.csv')) {
-      setFileError('Please save your Excel file as CSV first (File → Save As → CSV), then upload.');
+    const isZip = file.name.endsWith('.zip');
+    const isCsv = file.name.endsWith('.csv');
+
+    if (!isZip && !isCsv) {
+      setFileError('Please upload the ZIP file downloaded from your IVR portal, or a CSV file.');
       e.target.value = '';
       return;
     }
@@ -751,7 +753,39 @@ export default function IVREntryScreen() {
     setImporting(true);
 
     try {
-      const text = await file.text();
+      let text;
+
+      if (isZip) {
+        // Dynamically load JSZip from CDN on first use
+        if (!window.JSZip) {
+          await new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+            script.onload = resolve;
+            script.onerror = () => reject(new Error('Failed to load ZIP library. Check your internet connection.'));
+            document.head.appendChild(script);
+          });
+        }
+
+        const arrayBuffer = await file.arrayBuffer();
+        const zip = await window.JSZip.loadAsync(arrayBuffer);
+
+        // Find the first CSV file inside the zip
+        const csvFile = Object.values(zip.files).find(
+          (f) => !f.dir && f.name.toLowerCase().endsWith('.csv')
+        );
+
+        if (!csvFile) {
+          setFileError('No CSV file found inside the ZIP. Please check the downloaded file.');
+          setImporting(false);
+          e.target.value = '';
+          return;
+        }
+
+        text = await csvFile.async('text');
+      } else {
+        text = await file.text();
+      }
       const parsed = parseIVRFile(text);
 
       if (parsed.length === 0) {
@@ -901,10 +935,10 @@ export default function IVREntryScreen() {
             >
               <div className="text-4xl mb-3">📂</div>
               <p className="text-lg font-semibold text-slate-700 mb-1">
-                {importing ? 'Processing file…' : 'Upload IVR Call Report'}
+                {importing ? 'Processing file…' : 'Upload IVR Call Report (ZIP or CSV)'}
               </p>
               <p className="text-sm text-slate-500 mb-4">
-                Click to browse or drag &amp; drop your CSV file here
+                Click to browse or drag &amp; drop your ZIP or CSV file here
               </p>
               <div className="inline-flex items-center gap-2 text-xs text-slate-400 bg-white rounded-xl border border-slate-200 px-4 py-2">
                 <span>Required columns:</span>
@@ -915,7 +949,7 @@ export default function IVREntryScreen() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".csv"
+                accept=".zip,.csv"
                 className="hidden"
                 onChange={handleFileChange}
               />
@@ -928,8 +962,8 @@ export default function IVREntryScreen() {
             )}
 
             {/* Help note */}
-            <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
-              <strong>Excel users:</strong> Open your file in Excel → File → Save As → choose <strong>CSV (Comma delimited)</strong> → upload that file here.
+            <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800">
+              Upload the <strong>ZIP file</strong> directly as downloaded from your IVR portal. CSV files are also accepted.
             </div>
           </div>
         ) : (
