@@ -7,8 +7,6 @@ import {
 } from '../../services/walkinService';
 import { supabase } from '../../services/supabaseClient';
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
 const IVR_LEADS_TABLE = 'ivr_leads';
 const EMPLOYEES_TABLE = 'employees';
 const LOCATIONS_TABLE = 'locations';
@@ -20,7 +18,6 @@ const STATUS = {
   UNINTERESTED: 'uninterested',
   ERROR: 'error',
 };
-
 
 const DATE_FILTERS = [
   { value: 'today', label: 'Today' },
@@ -46,8 +43,6 @@ const FUEL_OPTIONS = [
   { code: 'EV',     label: 'EV' },
   { code: 'CNG',    label: 'CNG' },
 ];
-
-// ─── CSV / number helpers ─────────────────────────────────────────────────────
 
 function normalizePhone(raw) {
   if (!raw) return null;
@@ -106,8 +101,6 @@ function parseIVRFile(csvText) {
   return results;
 }
 
-// ─── Shared helpers ───────────────────────────────────────────────────────────
-
 function getDisplayName(person) {
   if (!person) return null;
   const first = person.first_name?.trim() || '';
@@ -164,14 +157,13 @@ function normalizeTranscriptionStatus(entry) {
   return { label: 'Pending', color: 'bg-slate-100 text-slate-600' };
 }
 
-// ─── Transcript viewer modal ──────────────────────────────────────────────────
+// ─── #8: Transcript modal (unchanged) ────────────────────────────────────────
 
 function TranscriptModal({ transcript, onClose }) {
   if (!transcript) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full p-6 max-h-[80vh] flex flex-col"
-        onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full p-6 max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-base font-semibold text-slate-800">Full Call Transcript</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
@@ -184,7 +176,89 @@ function TranscriptModal({ transcript, onClose }) {
   );
 }
 
-// ─── All Entries service ──────────────────────────────────────────────────────
+// ─── #8: Audio popover (replaces inline audio expansion) ─────────────────────
+
+function AudioPopover({ recordingUrl, onClose }) {
+  const [audioError, setAudioError] = useState(false);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-5 flex flex-col gap-3" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-800">Call Recording</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+        </div>
+        <audio controls autoPlay preload="auto" src={recordingUrl} className="w-full" onError={() => setAudioError(true)} />
+        {audioError && (
+          <p className="text-xs text-amber-700 bg-amber-50 rounded-lg p-2">
+            Playback blocked.{' '}
+            <a href={recordingUrl} target="_blank" rel="noreferrer" className="underline font-medium">Open raw link ↗</a>
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── #1: Details drawer ───────────────────────────────────────────────────────
+
+function DetailsDrawer({ dbLead, recordingUrl, onClose }) {
+  const [showTranscript, setShowTranscript] = useState(false);
+  const [showAudio, setShowAudio] = useState(false);
+  const hasAI = dbLead?.customer_name || dbLead?.model_name || dbLead?.fuel_type || dbLead?.conversation_summary;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 px-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 flex flex-col gap-4 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-semibold text-slate-800">Lead Details</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+        </div>
+        {hasAI ? (
+          <div className="space-y-2">
+            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">AI Extracted</p>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { label: 'Customer', value: dbLead?.customer_name },
+                { label: 'Model', value: dbLead?.model_name },
+                { label: 'Fuel', value: dbLead?.fuel_type ? FUEL_OPTIONS.find(f => f.code === dbLead.fuel_type)?.label || dbLead.fuel_type : null },
+                { label: 'Remarks', value: dbLead?.remarks },
+              ].map(({ label, value }) => (
+                <div key={label} className="bg-slate-50 rounded-xl px-3 py-2">
+                  <p className="text-[10px] text-slate-400 font-medium mb-0.5">{label}</p>
+                  <p className="text-sm text-slate-800 font-medium">{value || <span className="text-slate-300 font-normal">—</span>}</p>
+                </div>
+              ))}
+            </div>
+            {dbLead?.conversation_summary && (
+              <div className="bg-blue-50 rounded-xl px-3 py-2 border border-blue-100">
+                <p className="text-[10px] text-blue-500 font-semibold mb-1">AI Summary</p>
+                <p className="text-sm text-blue-900 leading-relaxed">{dbLead.conversation_summary}</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="bg-slate-50 rounded-xl px-4 py-6 text-center text-slate-400 text-sm">No AI data extracted yet</div>
+        )}
+        <div className="flex gap-2 flex-wrap pt-1">
+          {dbLead?.transcript && (
+            <button type="button" onClick={() => setShowTranscript(true)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-purple-50 text-purple-700 font-semibold border border-purple-200 hover:bg-purple-100 transition-colors">
+              📄 View Transcript
+            </button>
+          )}
+          {recordingUrl && (
+            <button type="button" onClick={() => setShowAudio(true)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-sky-50 text-sky-700 font-semibold border border-sky-200 hover:bg-sky-100 transition-colors">
+              ▶ Play Recording
+            </button>
+          )}
+        </div>
+      </div>
+      {showTranscript && <TranscriptModal transcript={dbLead?.transcript} onClose={() => setShowTranscript(false)} />}
+      {showAudio && <AudioPopover recordingUrl={recordingUrl} onClose={() => setShowAudio(false)} />}
+    </div>
+  );
+}
+
+// ─── All Entries: Inline Edit Row ─────────────────────────────────────────────
 
 async function fetchIVREntries(dateFilter) {
   let query = supabase
@@ -192,34 +266,21 @@ async function fetchIVREntries(dateFilter) {
     .select('id, customer_name, mobile_number, model_name, fuel_type, salesperson_id, location_id, remarks, conversation_summary, transcript, transcription_status, transcription_error, review_status, call_datetime, created_at, updated_at')
     .order('created_at', { ascending: false })
     .range(0, 9999);
-
   const range = getDateRange(dateFilter);
-  if (range) {
-    query = query.gte('created_at', range.start.toISOString()).lt('created_at', range.end.toISOString());
-  }
-
+  if (range) query = query.gte('created_at', range.start.toISOString()).lt('created_at', range.end.toISOString());
   const { data, error } = await query;
   if (error) throw error;
   const rows = data || [];
-
   const salespersonIds = [...new Set(rows.map(r => r.salesperson_id).filter(Boolean))];
   const locationIds = [...new Set(rows.map(r => r.location_id).filter(Boolean))];
-
   const [empResult, locResult] = await Promise.all([
-    salespersonIds.length
-      ? supabase.from(EMPLOYEES_TABLE).select('id, first_name, last_name').in('id', salespersonIds)
-      : Promise.resolve({ data: [], error: null }),
-    locationIds.length
-      ? supabase.from(LOCATIONS_TABLE).select('id, name').in('id', locationIds)
-      : Promise.resolve({ data: [], error: null }),
+    salespersonIds.length ? supabase.from(EMPLOYEES_TABLE).select('id, first_name, last_name').in('id', salespersonIds) : Promise.resolve({ data: [], error: null }),
+    locationIds.length ? supabase.from(LOCATIONS_TABLE).select('id, name').in('id', locationIds) : Promise.resolve({ data: [], error: null }),
   ]);
-
   if (empResult.error) throw empResult.error;
   if (locResult.error) throw locResult.error;
-
   const empById = new Map((empResult.data || []).map(e => [e.id, e]));
   const locById = new Map((locResult.data || []).map(l => [l.id, l]));
-
   return rows.map(row => ({
     ...row,
     salesperson_name: row.salesperson_id ? (getDisplayName(empById.get(row.salesperson_id)) || '—') : '—',
@@ -228,16 +289,12 @@ async function fetchIVREntries(dateFilter) {
 }
 
 async function updateIVREntry(id, payload) {
-  const { data, error } = await supabase
-    .from(IVR_LEADS_TABLE)
-    .update({ ...payload, updated_at: new Date().toISOString() })
-    .eq('id', id).select().single();
+  const { data, error } = await supabase.from(IVR_LEADS_TABLE).update({ ...payload, updated_at: new Date().toISOString() }).eq('id', id).select().single();
   if (error) throw error;
   return data;
 }
 
 async function promoteIVRLeadToAI(ivrLeadId, payload) {
-  // Create final AI lead from reviewed ivr_leads data
   const aiLeadPayload = {
     customer_name: payload.customer_name,
     mobile_number: payload.mobile_number,
@@ -254,43 +311,19 @@ async function promoteIVRLeadToAI(ivrLeadId, payload) {
     greenform_requested: false,
     assigned_at: payload.salesperson_id ? new Date().toISOString() : null,
   };
-
-  const { data: aiLead, error: aiError } = await supabase
-    .from('ai_leads')
-    .insert(aiLeadPayload)
-    .select('id')
-    .single();
-
+  const { data: aiLead, error: aiError } = await supabase.from('ai_leads').insert(aiLeadPayload).select('id').single();
   if (aiError) throw aiError;
-
-  // Link back: update ivr_leads with review_status, reviewed_at, and final_ai_lead_id
-  const { data: updated, error: updateError } = await supabase
-    .from(IVR_LEADS_TABLE)
-    .update({
-      review_status: 'interested',
-      reviewed_at: new Date().toISOString(),
-      final_ai_lead_id: aiLead.id,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', ivrLeadId)
-    .select()
-    .single();
-
+  const { data: updated, error: updateError } = await supabase.from(IVR_LEADS_TABLE).update({ review_status: 'interested', reviewed_at: new Date().toISOString(), final_ai_lead_id: aiLead.id, updated_at: new Date().toISOString() }).eq('id', ivrLeadId).select().single();
   if (updateError) throw updateError;
   return { aiLead, updatedIVRLead: updated };
 }
-
-// ─── Employee lookup by mobile ────────────────────────────────────────────────
 
 async function fetchEmployeesByMobile(rawPhones) {
   const normalized = [...new Set(rawPhones.map(normalizePhone).filter(Boolean))];
   if (!normalized.length) return new Map();
   const withCountryCode = normalized.map(m => `+91${m}`);
   const allVariants = [...normalized, ...withCountryCode];
-  const { data, error } = await supabase
-    .from(EMPLOYEES_TABLE)
-    .select('id, first_name, last_name, mobile, location_id')
-    .in('mobile', allVariants);
+  const { data, error } = await supabase.from(EMPLOYEES_TABLE).select('id, first_name, last_name, mobile, location_id').in('mobile', allVariants);
   if (error) throw error;
   const map = new Map();
   for (const emp of data || []) {
@@ -300,8 +333,6 @@ async function fetchEmployeesByMobile(rawPhones) {
   return map;
 }
 
-// ─── Inline Edit Row (All Entries) ───────────────────────────────────────────
-
 function AllEntriesRow({ entry, cars, locations, onSaved }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({});
@@ -310,124 +341,53 @@ function AllEntriesRow({ entry, cars, locations, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [rowError, setRowError] = useState('');
   const [showTranscript, setShowTranscript] = useState(false);
-
+  const callDateDisplay = formatCallDate(entry.call_datetime);
+  const { label: txLabel, color: txColor } = normalizeTranscriptionStatus(entry);
+  const { label: statusLabel, color: statusColor } = normalizeOptyStatus(entry);
   const setD = (field, value) => setDraft(prev => ({ ...prev, [field]: value }));
 
   useEffect(() => {
     if (!editing || !draft.location_id) { setSalespersons([]); return; }
     let mounted = true;
     setLoadingSP(true);
-    getSalesPersonsByLocation(draft.location_id)
-      .then(res => { if (mounted) setSalespersons(res || []); })
-      .catch(() => { if (mounted) setSalespersons([]); })
-      .finally(() => { if (mounted) setLoadingSP(false); });
+    getSalesPersonsByLocation(draft.location_id).then(res => { if (mounted) setSalespersons(res || []); }).catch(() => { if (mounted) setSalespersons([]); }).finally(() => { if (mounted) setLoadingSP(false); });
     return () => { mounted = false; };
   }, [draft.location_id, editing]);
 
   const handleEdit = () => {
-    setDraft({
-      customer_name: entry.customer_name || '',
-      model_name: entry.model_name || '',
-      fuel_type: entry.fuel_type || '',
-      location_id: entry.location_id || '',
-      salesperson_id: entry.salesperson_id || '',
-      remarks: entry.remarks || '',
-    });
+    setDraft({ customer_name: entry.customer_name || '', model_name: entry.model_name || '', fuel_type: entry.fuel_type || '', location_id: entry.location_id || '', salesperson_id: entry.salesperson_id || '', remarks: entry.remarks || '' });
     setRowError('');
     setEditing(true);
   };
-
   const handleCancel = () => { setEditing(false); setRowError(''); };
-
   const handleSave = async () => {
-    setSaving(true);
-    setRowError('');
+    setSaving(true); setRowError('');
     try {
-      await updateIVREntry(entry.id, {
-        customer_name: draft.customer_name?.trim() || null,
-        model_name: draft.model_name || null,
-        fuel_type: draft.fuel_type || null,
-        location_id: draft.location_id || null,
-        salesperson_id: draft.salesperson_id || null,
-        remarks: draft.remarks?.trim() || null,
-      });
-      setEditing(false);
-      onSaved();
-    } catch (err) {
-      setRowError(err?.message || 'Save failed.');
-    } finally {
-      setSaving(false);
-    }
+      await updateIVREntry(entry.id, { customer_name: draft.customer_name?.trim() || null, model_name: draft.model_name || null, fuel_type: draft.fuel_type || null, location_id: draft.location_id || null, salesperson_id: draft.salesperson_id || null, remarks: draft.remarks?.trim() || null });
+      setEditing(false); onSaved();
+    } catch (err) { setRowError(err?.message || 'Save failed.'); }
+    finally { setSaving(false); }
   };
-
-  const { label: statusLabel, color: statusColor } = normalizeOptyStatus(entry);
-  const { label: txLabel, color: txColor } = normalizeTranscriptionStatus(entry);
-  const callDateDisplay = formatCallDate(entry.call_datetime);
 
   if (editing) {
     return (
-      <tr className="bg-blue-50 border-b border-blue-100">
+      <tr className="border-b border-slate-200 bg-blue-50/60">
         <td className="px-3 py-2 text-xs text-slate-400 whitespace-nowrap">{formatDateTime(entry.created_at)}</td>
-        <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap">{callDateDisplay || <span className="text-slate-300">—</span>}</td>
-        <td className="px-3 py-2">
-          <input autoFocus type="text" className="kiosk-input !min-h-[34px] !py-1 !text-sm w-full"
-            value={draft.customer_name} placeholder="Customer name"
-            onChange={e => setD('customer_name', e.target.value)}
-            onKeyDown={e => { if (e.key === 'Escape') handleCancel(); }} />
-        </td>
+        <td className="px-3 py-2 text-xs text-slate-600 whitespace-nowrap">{callDateDisplay || '—'}</td>
+        <td className="px-3 py-2"><input type="text" className="kiosk-input !min-h-[32px] !py-1 !text-sm w-full" placeholder="Name" value={draft.customer_name} onChange={e => setD('customer_name', e.target.value)} /></td>
         <td className="px-3 py-2 text-sm text-slate-700 font-mono">{entry.mobile_number}</td>
-        <td className="px-3 py-2">
-          <select className="kiosk-select !min-h-[34px] !py-1 !text-sm w-full"
-            value={draft.model_name} onChange={e => setD('model_name', e.target.value)}>
-            <option value="">— Model —</option>
-            {cars.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-          </select>
-        </td>
-        <td className="px-3 py-2">
-          <select className="kiosk-select !min-h-[34px] !py-1 !text-sm w-full"
-            value={draft.fuel_type} onChange={e => setD('fuel_type', e.target.value)}>
-            <option value="">— Fuel —</option>
-            {FUEL_OPTIONS.map(f => <option key={f.code} value={f.code}>{f.label}</option>)}
-          </select>
-        </td>
-        <td className="px-3 py-2">
-          <select className="kiosk-select !min-h-[34px] !py-1 !text-sm w-full"
-            value={draft.location_id} onChange={e => setD('location_id', e.target.value)}>
-            <option value="">— Branch —</option>
-            {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
-        </td>
-        <td className="px-3 py-2">
-          <select className="kiosk-select !min-h-[34px] !py-1 !text-sm w-full"
-            value={draft.salesperson_id} onChange={e => setD('salesperson_id', e.target.value)}
-            disabled={!draft.location_id || loadingSP}>
-            <option value="">{!draft.location_id ? 'Select branch first' : '— Advisor —'}</option>
-            {salespersons.map(sp => <option key={sp.id} value={sp.id}>{getDisplayName(sp)}</option>)}
-          </select>
-        </td>
-        <td className="px-3 py-2">
-          <input type="text" className="kiosk-input !min-h-[34px] !py-1 !text-sm w-full"
-            value={draft.remarks} placeholder="Remarks"
-            onChange={e => setD('remarks', e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') handleCancel(); }} />
-        </td>
-        <td className="px-3 py-2 text-xs text-slate-400">
-          {entry.transcript
-            ? <button type="button" onClick={() => setShowTranscript(true)} className="text-blue-500 underline hover:text-blue-700">View</button>
-            : <span className="text-slate-300">—</span>}
-        </td>
+        <td className="px-3 py-2"><select className="kiosk-select !min-h-[32px] !py-1 !text-sm" value={draft.model_name} onChange={e => setD('model_name', e.target.value)}><option value="">Optional</option>{cars.map(car => <option key={car.id} value={car.name}>{car.name}</option>)}</select></td>
+        <td className="px-3 py-2"><select className="kiosk-select !min-h-[32px] !py-1 !text-sm" value={draft.fuel_type} onChange={e => setD('fuel_type', e.target.value)}><option value="">Optional</option>{FUEL_OPTIONS.map(f => <option key={f.code} value={f.code}>{f.label}</option>)}</select></td>
+        <td className="px-3 py-2"><select className="kiosk-select !min-h-[32px] !py-1 !text-sm" value={draft.location_id} onChange={e => setD('location_id', e.target.value)}><option value="">Select branch</option>{locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name || `Branch #${loc.id}`}</option>)}</select></td>
+        <td className="px-3 py-2"><select className="kiosk-select !min-h-[32px] !py-1 !text-sm" value={draft.salesperson_id} onChange={e => setD('salesperson_id', e.target.value)} disabled={loadingSP}><option value="">{loadingSP ? 'Loading…' : 'Select advisor'}</option>{salespersons.map(sp => <option key={sp.id} value={sp.id}>{getDisplayName(sp)}</option>)}</select></td>
+        <td className="px-3 py-2"><input type="text" className="kiosk-input !min-h-[32px] !py-1 !text-sm w-full" placeholder="Remarks" value={draft.remarks} onChange={e => setD('remarks', e.target.value)} /></td>
+        <td className="px-3 py-2 text-xs"><span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${txColor}`}>{txLabel}</span>{entry.transcript && <button type="button" onClick={() => setShowTranscript(true)} className="ml-1 text-blue-500 underline text-[10px]">Transcript</button>}</td>
         <td className="px-3 py-2"><span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${statusColor}`}>{statusLabel}</span></td>
         <td className="px-3 py-2"><span className="text-[11px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 font-semibold">{normalizeLeadSource(entry.lead_source)}</span></td>
         <td className="px-3 py-2 text-right whitespace-nowrap">
           <div className="flex items-center justify-end gap-1.5">
-            <button type="button" onClick={handleSave} disabled={saving}
-              className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50">
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-            <button type="button" onClick={handleCancel}
-              className="text-[11px] px-2.5 py-1 rounded-lg border border-slate-300 text-slate-600 bg-white hover:bg-slate-50">
-              Cancel
-            </button>
+            <button type="button" onClick={handleSave} disabled={saving} className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
+            <button type="button" onClick={handleCancel} className="text-[11px] px-2.5 py-1 rounded-lg border border-slate-300 text-slate-600 bg-white hover:bg-slate-50">Cancel</button>
           </div>
           {rowError && <p className="text-[10px] text-red-600 mt-1 text-right">{rowError}</p>}
         </td>
@@ -443,49 +403,24 @@ function AllEntriesRow({ entry, cars, locations, onSaved }) {
       <td className="px-3 py-2.5 text-sm text-slate-800">{entry.customer_name || <span className="text-slate-300">—</span>}</td>
       <td className="px-3 py-2.5 text-sm text-slate-700 font-mono">{entry.mobile_number}</td>
       <td className="px-3 py-2.5 text-sm text-slate-700">{entry.model_name || <span className="text-slate-300">—</span>}</td>
-      <td className="px-3 py-2.5 text-sm text-slate-700">
-        {entry.fuel_type
-          ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold">{FUEL_OPTIONS.find(f => f.code === entry.fuel_type)?.label || entry.fuel_type}</span>
-          : <span className="text-slate-300">—</span>}
-      </td>
+      <td className="px-3 py-2.5">{entry.fuel_type ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold">{FUEL_OPTIONS.find(f => f.code === entry.fuel_type)?.label || entry.fuel_type}</span> : <span className="text-slate-300">—</span>}</td>
       <td className="px-3 py-2.5 text-sm text-slate-700">{entry.location_name}</td>
       <td className="px-3 py-2.5 text-sm text-slate-700">{entry.salesperson_name}</td>
-      <td className="px-3 py-2.5 text-xs text-slate-500 max-w-[160px] truncate" title={entry.remarks || ''}>
-        {entry.remarks || <span className="text-slate-300">—</span>}
-      </td>
+      <td className="px-3 py-2.5 text-xs text-slate-500 max-w-[160px] truncate" title={entry.remarks || ''}>{entry.remarks || <span className="text-slate-300">—</span>}</td>
       <td className="px-3 py-2.5 text-xs max-w-[180px]">
         <div className="flex flex-col gap-1">
           <span className={`w-fit text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${txColor}`}>{txLabel}</span>
-          {entry.transcript ? (
-            <>
-              <button type="button" onClick={() => setShowTranscript(true)}
-                className="text-blue-500 underline hover:text-blue-700">View transcript</button>
-              {showTranscript && <TranscriptModal transcript={entry.transcript} onClose={() => setShowTranscript(false)} />}
-            </>
-          ) : (
-            <span className="text-slate-300">—</span>
-          )}
-          {entry.conversation_summary && (
-            <span className="text-[10px] text-slate-400 truncate" title={entry.conversation_summary}>{entry.conversation_summary}</span>
-          )}
-          {entry.transcription_status === 'failed' && entry.transcription_error && (
-            <span className="text-[10px] text-red-500 truncate" title={entry.transcription_error}>{entry.transcription_error}</span>
-          )}
+          {entry.transcript ? (<><button type="button" onClick={() => setShowTranscript(true)} className="text-blue-500 underline hover:text-blue-700 text-left">View transcript</button>{showTranscript && <TranscriptModal transcript={entry.transcript} onClose={() => setShowTranscript(false)} />}</>) : <span className="text-slate-300">—</span>}
+          {entry.conversation_summary && <span className="text-[10px] text-slate-400 truncate" title={entry.conversation_summary}>{entry.conversation_summary}</span>}
+          {entry.transcription_status === 'failed' && entry.transcription_error && <span className="text-[10px] text-red-500 truncate" title={entry.transcription_error}>{entry.transcription_error}</span>}
         </div>
       </td>
       <td className="px-3 py-2.5"><span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${statusColor}`}>{statusLabel}</span></td>
       <td className="px-3 py-2.5"><span className="text-[11px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 font-semibold">{normalizeLeadSource(entry.lead_source)}</span></td>
-      <td className="px-3 py-2.5 text-right">
-        <button type="button" onClick={handleEdit}
-          className="text-[11px] px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-100 font-semibold">
-          Edit
-        </button>
-      </td>
+      <td className="px-3 py-2.5 text-right"><button type="button" onClick={handleEdit} className="text-[11px] px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-100 font-semibold">Edit</button></td>
     </tr>
   );
 }
-
-// ─── All Entries Tab ──────────────────────────────────────────────────────────
 
 function AllEntriesTab({ cars, locations }) {
   const [dateFilter, setDateFilter] = useState('today');
@@ -493,59 +428,31 @@ function AllEntriesTab({ cars, locations }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
-
   const load = useCallback(async () => {
-    setLoading(true);
-    setLoadError('');
+    setLoading(true); setLoadError('');
     try { setEntries(await fetchIVREntries(dateFilter)); }
     catch (err) { setLoadError(err?.message || 'Failed to load entries.'); }
     finally { setLoading(false); }
   }, [dateFilter]);
-
   useEffect(() => { load(); }, [load]);
-
   const filtered = entries.filter(e => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
-    return (
-      (e.customer_name || '').toLowerCase().includes(q) ||
-      (e.mobile_number || '').includes(q) ||
-      (e.model_name || '').toLowerCase().includes(q) ||
-      (e.location_name || '').toLowerCase().includes(q) ||
-      (e.salesperson_name || '').toLowerCase().includes(q) ||
-      (e.remarks || '').toLowerCase().includes(q)
-    );
+    return (e.customer_name || '').toLowerCase().includes(q) || (e.mobile_number || '').includes(q) || (e.model_name || '').toLowerCase().includes(q) || (e.location_name || '').toLowerCase().includes(q) || (e.salesperson_name || '').toLowerCase().includes(q) || (e.remarks || '').toLowerCase().includes(q);
   });
-
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex gap-1.5">
-          {DATE_FILTERS.map(f => (
-            <button key={f.value} type="button" onClick={() => setDateFilter(f.value)}
-              className={`text-xs px-3 py-1.5 rounded-xl font-semibold transition-colors ${dateFilter === f.value ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-              {f.label}
-            </button>
-          ))}
+          {DATE_FILTERS.map(f => (<button key={f.value} type="button" onClick={() => setDateFilter(f.value)} className={`text-xs px-3 py-1.5 rounded-xl font-semibold transition-colors ${dateFilter === f.value ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>{f.label}</button>))}
         </div>
         <div className="flex gap-2">
-          <input type="text" className="kiosk-input !min-h-[36px] !py-1.5 !text-sm w-52"
-            placeholder="Search name, mobile, model…" value={search}
-            onChange={e => setSearch(e.target.value)} />
-          <button type="button" onClick={load} disabled={loading}
-            className="text-[11px] px-3 py-1.5 rounded-xl border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 font-semibold">
-            {loading ? '…' : '↻ Refresh'}
-          </button>
+          <input type="text" className="kiosk-input !min-h-[36px] !py-1.5 !text-sm w-52" placeholder="Search name, mobile, model…" value={search} onChange={e => setSearch(e.target.value)} />
+          <button type="button" onClick={load} disabled={loading} className="text-[11px] px-3 py-1.5 rounded-xl border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 font-semibold">{loading ? '…' : '↻ Refresh'}</button>
         </div>
       </div>
-
-      <div className="text-xs text-slate-400 font-medium">
-        {loading ? 'Loading…' : `${filtered.length} entr${filtered.length !== 1 ? 'ies' : 'y'}`}
-        {search && entries.length !== filtered.length ? ` (filtered from ${entries.length})` : ''}
-      </div>
-
+      <div className="text-xs text-slate-400 font-medium">{loading ? 'Loading…' : `${filtered.length} entr${filtered.length !== 1 ? 'ies' : 'y'}`}{search && entries.length !== filtered.length ? ` (filtered from ${entries.length})` : ''}</div>
       {loadError && <p className="error-text">{loadError}</p>}
-
       {!loading && filtered.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-200 py-16 text-center text-slate-400 text-sm">No entries found</div>
       ) : (
@@ -568,11 +475,7 @@ function AllEntriesTab({ cars, locations }) {
                 <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-right">Action</th>
               </tr>
             </thead>
-            <tbody>
-              {filtered.map(entry => (
-                <AllEntriesRow key={entry.id} entry={entry} cars={cars} locations={locations} onSaved={load} />
-              ))}
-            </tbody>
+            <tbody>{filtered.map(entry => <AllEntriesRow key={entry.id} entry={entry} cars={cars} locations={locations} onSaved={load} />)}</tbody>
           </table>
         </div>
       )}
@@ -580,12 +483,51 @@ function AllEntriesTab({ cars, locations }) {
   );
 }
 
+// ─── #4: AI confidence badge ──────────────────────────────────────────────────
+
+function AIConfidenceBadge({ value }) {
+  if (!value) return null;
+  const len = String(value).trim().length;
+  if (len >= 4) return <span className="text-[9px] px-1 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold ml-1">AI ✓</span>;
+  return <span className="text-[9px] px-1 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold ml-1">AI ~</span>;
+}
+
+// ─── #1: Compact details preview cell ────────────────────────────────────────
+
+function DetailsPreviewCell({ dbLead, recordingUrl, rowStatus, savedSummary, errorMessage }) {
+  const [showDrawer, setShowDrawer] = useState(false);
+  if (rowStatus === STATUS.SAVED && savedSummary) {
+    return <td className="px-3 py-2 text-xs text-emerald-700 max-w-[260px]"><span className="font-medium">✓ {savedSummary}</span></td>;
+  }
+  if (rowStatus === STATUS.ERROR) {
+    return <td className="px-3 py-2 text-xs text-yellow-700 max-w-[260px]">{errorMessage}</td>;
+  }
+  const hasModel = dbLead?.model_name;
+  const hasFuel = dbLead?.fuel_type;
+  const hasSummary = dbLead?.conversation_summary;
+  const hasAny = hasModel || hasFuel || hasSummary || dbLead?.customer_name;
+  return (
+    <td className="px-3 py-2 max-w-[260px]">
+      {hasAny ? (
+        <button type="button" onClick={() => setShowDrawer(true)} className="text-left w-full group">
+          <div className="text-xs text-slate-700 font-medium flex items-center gap-1 flex-wrap">
+            {hasModel && <span>{dbLead.model_name}<AIConfidenceBadge value={dbLead.model_name} /></span>}
+            {hasFuel && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold ml-0.5">{FUEL_OPTIONS.find(f => f.code === dbLead.fuel_type)?.label || dbLead.fuel_type}</span>}
+          </div>
+          {hasSummary && <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-2 group-hover:text-slate-600 transition-colors">{dbLead.conversation_summary}</p>}
+          <span className="text-[10px] text-blue-500 underline mt-0.5 block group-hover:text-blue-700">View all details →</span>
+        </button>
+      ) : (
+        <span className="text-[11px] text-slate-300">No AI data yet</span>
+      )}
+      {showDrawer && <DetailsDrawer dbLead={dbLead} recordingUrl={recordingUrl} onClose={() => setShowDrawer(false)} />}
+    </td>
+  );
+}
+
 // ─── Entry Tab IVR Row ────────────────────────────────────────────────────────
 
-function IVRRow({
-  row, cars, locations, loadingCars, loadingLocations,
-  onMarkUninterested, onSaveInterested, onFocusNext, interestedBtnRef,
-}) {
+function IVRRow({ row, cars, locations, loadingCars, loadingLocations, onMarkUninterested, onSaveInterested, onFocusNext, interestedBtnRef, isFocused }) {
   const dbLead = row.dbLead || null;
   const recordingUrl = dbLead?.call_recording_url || row.callRecordingUrl || null;
   const [data, setData] = useState(() => ({
@@ -599,14 +541,10 @@ function IVRRow({
     salespersonId: row.matchedSalespersonId || '',
     locationId: row.matchedLocationId || '',
   }));
-  const [salespersons, setSalespersons] = useState(
-    row.matchedSalesperson ? [row.matchedSalesperson] : []
-  );
+  const [salespersons, setSalespersons] = useState(row.matchedSalesperson ? [row.matchedSalesperson] : []);
   const [loadingSP, setLoadingSP] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [showTranscript, setShowTranscript] = useState(false);
-  const [showAudio, setShowAudio] = useState(false);
-  const [audioError, setAudioError] = useState(false);
 
   const customerNameRef = useRef(null);
   const modelRef = useRef(null);
@@ -614,15 +552,9 @@ function IVRRow({
 
   useEffect(() => {
     let mounted = true;
-    if (!data.locationId) {
-      setSalespersons(row.matchedSalesperson ? [row.matchedSalesperson] : []);
-      return;
-    }
+    if (!data.locationId) { setSalespersons(row.matchedSalesperson ? [row.matchedSalesperson] : []); return; }
     setLoadingSP(true);
-    getSalesPersonsByLocation(data.locationId)
-      .then(res => { if (mounted) setSalespersons(res || []); })
-      .catch(() => { if (mounted) setSalespersons([]); })
-      .finally(() => { if (mounted) setLoadingSP(false); });
+    getSalesPersonsByLocation(data.locationId).then(res => { if (mounted) setSalespersons(res || []); }).catch(() => { if (mounted) setSalespersons([]); }).finally(() => { if (mounted) setLoadingSP(false); });
     return () => { mounted = false; };
   }, [data.locationId]);
 
@@ -630,43 +562,27 @@ function IVRRow({
   const isDone = row.status === STATUS.SAVED || row.status === STATUS.UNINTERESTED;
   const isSaving = row.status === STATUS.SAVING;
 
-  const rowBg =
-    row.status === STATUS.SAVED ? 'bg-green-50' :
-    row.status === STATUS.UNINTERESTED ? 'bg-red-50 opacity-60' :
-    row.status === STATUS.ERROR ? 'bg-yellow-50' : 'bg-white';
+  // #7: Left-border accent by status
+  const rowClass =
+    row.status === STATUS.SAVED ? 'border-l-4 border-l-emerald-500 bg-emerald-50/40' :
+    row.status === STATUS.UNINTERESTED ? 'border-l-4 border-l-red-300 bg-red-50/30 opacity-55' :
+    row.status === STATUS.ERROR ? 'border-l-4 border-l-yellow-400 bg-yellow-50/40' :
+    isFocused ? 'border-l-4 border-l-blue-500 bg-blue-50/20' :
+    'border-l-4 border-l-transparent bg-white';
 
-  const handleSave = useCallback(async () => {
-    await onSaveInterested(row.id, data);
-    onFocusNext();
-  }, [row.id, data, onSaveInterested, onFocusNext]);
+  const handleSave = useCallback(async () => { await onSaveInterested(row.id, data); onFocusNext(); }, [row.id, data, onSaveInterested, onFocusNext]);
 
   const handleRowKeyDown = useCallback((e) => {
     if (isDone || isSaving) return;
-    if ((e.key === 'u' || e.key === 'U') && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
-      e.preventDefault();
-      onMarkUninterested(row.id);
-      onFocusNext();
-    }
+    if ((e.key === 'u' || e.key === 'U') && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') { e.preventDefault(); onMarkUninterested(row.id); onFocusNext(); }
   }, [isDone, isSaving, onMarkUninterested, onFocusNext, row.id]);
 
-  const chainEnter = (e, nextRef) => {
-    if (e.key === 'Enter') { e.preventDefault(); nextRef?.current?.focus(); }
-  };
+  const chainEnter = (e, nextRef) => { if (e.key === 'Enter') { e.preventDefault(); nextRef?.current?.focus(); } };
+  const handleRemarksKeyDown = useCallback((e) => { if (e.key === 'Enter') { e.preventDefault(); handleSave(); } }, [handleSave]);
 
-  const handleRemarksKeyDown = useCallback((e) => {
-    if (e.key === 'Enter') { e.preventDefault(); handleSave(); }
-  }, [handleSave]);
-
+  // #2: Pre-fill from AI data when opening editor
   const openExpandedEditor = () => {
-    setData(prev => ({
-      ...prev,
-      customerName: dbLead?.customer_name || prev.customerName,
-      modelName: dbLead?.model_name || prev.modelName,
-      fuelType: dbLead?.fuel_type || prev.fuelType,
-      conversationSummary: dbLead?.conversation_summary || prev.conversationSummary,
-      remarks: dbLead?.remarks || prev.remarks,
-      transcript: dbLead?.transcript || prev.transcript,
-    }));
+    setData(prev => ({ ...prev, customerName: dbLead?.customer_name || prev.customerName, modelName: dbLead?.model_name || prev.modelName, fuelType: dbLead?.fuel_type || prev.fuelType, conversationSummary: dbLead?.conversation_summary || prev.conversationSummary, remarks: dbLead?.remarks || prev.remarks, transcript: dbLead?.transcript || prev.transcript }));
     setExpanded(true);
     setTimeout(() => customerNameRef.current?.focus(), 50);
   };
@@ -684,210 +600,107 @@ function IVRRow({
 
   return (
     <tbody>
-      <tr className={`border-b border-slate-100 transition-colors ${rowBg}`} onKeyDown={handleRowKeyDown}>
+      <tr className={`border-b border-slate-100 transition-colors ${rowClass}`} onKeyDown={handleRowKeyDown}>
         <td className="px-3 py-2 text-xs text-slate-400 font-mono w-8">{row.index + 1}</td>
         <td className="px-3 py-2 text-sm font-semibold text-slate-800 w-36">{row.mobile}</td>
-        <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap w-28">
-          {row.callDate || <span className="text-slate-300">—</span>}
-        </td>
-        <td className="px-3 py-2 text-xs w-36">
-          {row.matchedSalesperson
-            ? <span className="text-emerald-700 font-medium">✓ {getDisplayName(row.matchedSalesperson)}</span>
-            : <span className="text-slate-300">No match</span>}
-        </td>
+        <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap w-28">{row.callDate || <span className="text-slate-300">—</span>}</td>
+        <td className="px-3 py-2 text-xs w-36">{row.matchedSalesperson ? <span className="text-emerald-700 font-medium">✓ {getDisplayName(row.matchedSalesperson)}</span> : <span className="text-slate-300">No match</span>}</td>
         <td className="px-3 py-2 text-xs w-32">{aiBadge()}</td>
         <td className="px-3 py-2 w-28">
-          {row.status === STATUS.SAVED && <span className="text-[11px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-semibold">✓ Saved</span>}
+          {row.status === STATUS.SAVED && <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">✓ Saved</span>}
           {row.status === STATUS.UNINTERESTED && <span className="text-[11px] px-2 py-0.5 rounded-full bg-red-100 text-red-600 font-semibold">Uninterested</span>}
           {row.status === STATUS.ERROR && <span className="text-[11px] px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 font-semibold">Error</span>}
           {row.status === STATUS.PENDING && <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">Pending</span>}
           {row.status === STATUS.SAVING && <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-600 animate-pulse">Saving…</span>}
         </td>
-        <td className="px-3 py-2 text-xs text-slate-500">
-          <div className="flex flex-col gap-0.5 max-w-[320px]">
-            <span className="truncate" title={dbLead?.customer_name || ''}>
-              <span className="text-slate-400">Name: </span>
-              {dbLead?.customer_name || <span className="text-slate-300">-</span>}
-            </span>
-            <span className="truncate" title={dbLead?.model_name || ''}>
-              <span className="text-slate-400">Model: </span>
-              {dbLead?.model_name || <span className="text-slate-300">-</span>}
-            </span>
-            <span className="truncate" title={dbLead?.fuel_type || ''}>
-              <span className="text-slate-400">Fuel: </span>
-              {dbLead?.fuel_type || <span className="text-slate-300">-</span>}
-            </span>
-            <span className="truncate" title={dbLead?.remarks || ''}>
-              <span className="text-slate-400">Remarks: </span>
-              {dbLead?.remarks || <span className="text-slate-300">(operator note empty)</span>}
-            </span>
-            <div className="text-[11px] leading-snug" title={dbLead?.conversation_summary || ''}>
-              <span className="text-slate-400">Summary: </span>
-              {dbLead?.conversation_summary ? (
-                <span
-                  className="text-slate-600"
-                  style={{
-                    display: '-webkit-box',
-                    WebkitLineClamp: 2,
-                    WebkitBoxOrient: 'vertical',
-                    overflow: 'hidden',
-                  }}
-                >
-                  {dbLead.conversation_summary}
-                </span>
-              ) : (
-                <span className="text-slate-300">-</span>
-              )}
-            </div>
-            {dbLead?.transcript && (
-              <button
-                type="button"
-                onClick={() => setShowTranscript(true)}
-                className="w-fit text-blue-500 underline hover:text-blue-700"
-              >
-                View Transcript
-              </button>
-            )}
-            {recordingUrl && (
-              <div className="flex flex-col gap-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowAudio(prev => !prev);
-                    setAudioError(false);
-                  }}
-                  className="w-fit text-blue-500 underline hover:text-blue-700"
-                >
-                  {showAudio ? 'Hide Recording' : 'Play Recording'}
-                </button>
-                {showAudio && (
-                  <>
-                    <audio
-                      controls
-                      preload="none"
-                      src={recordingUrl}
-                      className="h-8 w-full max-w-[220px]"
-                      onError={() => setAudioError(true)}
-                    />
-                    {audioError && (
-                      <span className="text-[10px] text-amber-700">Playback blocked. Open raw link instead.</span>
-                    )}
-                    <a
-                      href={recordingUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="w-fit text-blue-500 underline hover:text-blue-700"
-                    >
-                      Open raw link
-                    </a>
-                  </>
-                )}
-              </div>
-            )}
-            {row.status === STATUS.SAVED && row.savedSummary
-              ? <span className="text-emerald-700">{row.savedSummary}</span>
-              : row.status === STATUS.ERROR
-              ? <span className="text-yellow-700">{row.errorMessage}</span>
-              : null}
-          </div>
-        </td>
+
+        {/* #1: Compact details cell with drawer */}
+        <DetailsPreviewCell dbLead={dbLead} recordingUrl={recordingUrl} rowStatus={row.status} savedSummary={row.savedSummary} errorMessage={row.errorMessage} />
+
         <td className="px-3 py-2 text-right whitespace-nowrap">
           {!isDone && (
-            <div className="flex items-center justify-end gap-1.5">
+            <div className="flex items-center justify-end gap-1.5 relative">
               {!expanded ? (
                 <button ref={interestedBtnRef} type="button"
                   className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
-                  onClick={openExpandedEditor}
-                  disabled={isSaving} title="U = Uninterested">
+                  onClick={openExpandedEditor} disabled={isSaving}>
                   Interested
                 </button>
               ) : (
                 <button type="button"
-                  className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
+                  className="text-[11px] px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50"
                   onClick={handleSave} disabled={isSaving}>
-                  {isSaving ? 'Saving…' : 'Save'}
+                  {isSaving ? 'Saving…' : '✓ Save Lead'}
                 </button>
               )}
               <button type="button"
                 className="text-[11px] px-2.5 py-1 rounded-lg border border-red-200 text-red-600 bg-white font-semibold hover:bg-red-50 transition-colors disabled:opacity-50"
-                onClick={() => { onMarkUninterested(row.id); onFocusNext(); }}
-                disabled={isSaving} title="U key shortcut">
-                Uninterested
+                onClick={() => { onMarkUninterested(row.id); onFocusNext(); }} disabled={isSaving} title="U key shortcut">
+                Unin.
               </button>
-              {expanded && (
-                <button type="button" className="text-[11px] text-slate-400 underline ml-0.5"
-                  onClick={() => setExpanded(false)}>
-                  Cancel
-                </button>
+              {expanded && <button type="button" className="text-[11px] text-slate-400 underline ml-0.5" onClick={() => setExpanded(false)}>Cancel</button>}
+
+              {/* #6: Context-sensitive keyboard shortcut tooltip on focused row */}
+              {isFocused && !expanded && (
+                <div className="absolute -top-7 right-0 flex gap-1.5 text-[10px] bg-slate-800 text-white rounded-lg px-2 py-1 whitespace-nowrap shadow-lg z-10 pointer-events-none">
+                  <span><kbd className="font-mono bg-slate-600 rounded px-1">Enter</kbd> interested</span>
+                  <span><kbd className="font-mono bg-slate-600 rounded px-1">U</kbd> skip</span>
+                </div>
               )}
             </div>
           )}
         </td>
       </tr>
 
+      {/* #2: Expanded editor pre-filled from AI data */}
       {expanded && !isDone && (
-        <tr className="bg-slate-50 border-b border-slate-200">
+        <tr className="bg-slate-50/80 border-b border-slate-200">
           <td colSpan={8} className="px-4 py-3">
-            <p className="text-[11px] text-slate-400 mb-2.5">
-              <kbd className="bg-white border border-slate-200 rounded px-1 font-mono">Enter</kbd> next &nbsp;·&nbsp;
-              <kbd className="bg-white border border-slate-200 rounded px-1 font-mono">↑↓</kbd> dropdown &nbsp;·&nbsp;
-              <kbd className="bg-white border border-slate-200 rounded px-1 font-mono">Enter</kbd> on Remarks saves &nbsp;·&nbsp;
-              <kbd className="bg-white border border-slate-200 rounded px-1 font-mono">U</kbd> Uninterested
-            </p>
             <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 lg:grid-cols-6">
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
                 Customer Name
-                <input ref={customerNameRef} type="text" className="kiosk-input !min-h-[36px] !py-1.5 !text-sm"
-                  placeholder="Optional" value={data.customerName}
-                  onChange={e => set('customerName', e.target.value)}
-                  onKeyDown={e => chainEnter(e, modelRef)} />
+                <input ref={customerNameRef} type="text" className="kiosk-input !min-h-[36px] !py-1.5 !text-sm" placeholder="Optional" value={data.customerName} onChange={e => set('customerName', e.target.value)} onKeyDown={e => chainEnter(e, modelRef)} />
               </label>
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
                 Model
-                <select ref={modelRef} className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
-                  value={data.modelName} onChange={e => set('modelName', e.target.value)} disabled={loadingCars}>
+                {data.modelName && <span className="text-[9px] text-emerald-600 font-semibold -mb-0.5">AI pre-filled ✓</span>}
+                <select ref={modelRef} className="kiosk-select !min-h-[36px] !py-1.5 !text-sm" value={data.modelName} onChange={e => set('modelName', e.target.value)} disabled={loadingCars}>
                   <option value="">{loadingCars ? 'Loading…' : 'Optional'}</option>
                   {cars.map(car => <option key={car.id} value={car.name}>{car.name}</option>)}
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
                 Fuel
-                <select className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
-                  value={data.fuelType} onChange={e => set('fuelType', e.target.value)}>
+                {data.fuelType && <span className="text-[9px] text-emerald-600 font-semibold -mb-0.5">AI pre-filled ✓</span>}
+                <select className="kiosk-select !min-h-[36px] !py-1.5 !text-sm" value={data.fuelType} onChange={e => set('fuelType', e.target.value)}>
                   <option value="">Optional</option>
                   {FUEL_OPTIONS.map(f => <option key={f.code} value={f.code}>{f.label}</option>)}
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
                 Branch
-                <select className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
-                  value={data.locationId} onChange={e => set('locationId', e.target.value)} disabled={loadingLocations}>
+                <select className="kiosk-select !min-h-[36px] !py-1.5 !text-sm" value={data.locationId} onChange={e => set('locationId', e.target.value)} disabled={loadingLocations}>
                   <option value="">{loadingLocations ? 'Loading…' : 'Select branch'}</option>
                   {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name || `Branch #${loc.id}`}</option>)}
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
                 Sales Advisor
-                <select className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
-                  value={data.salespersonId} onChange={e => set('salespersonId', e.target.value)}
-                  disabled={loadingSP}>
+                {data.salespersonId && row.matchedSalesperson && <span className="text-[9px] text-emerald-600 font-semibold -mb-0.5">Auto-matched ✓</span>}
+                <select className="kiosk-select !min-h-[36px] !py-1.5 !text-sm" value={data.salespersonId} onChange={e => set('salespersonId', e.target.value)} disabled={loadingSP}>
                   <option value="">{loadingSP ? 'Loading…' : 'Select advisor'}</option>
                   {salespersons.map(sp => <option key={sp.id} value={sp.id}>{getDisplayName(sp)}</option>)}
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
                 Remarks <span className="font-normal text-slate-400">(operator note)</span>
-                <input ref={remarksRef} type="text" className="kiosk-input !min-h-[36px] !py-1.5 !text-sm"
-                  placeholder="Optional · Enter to save" value={data.remarks}
-                  onChange={e => set('remarks', e.target.value)}
-                  onKeyDown={handleRemarksKeyDown} />
+                <input ref={remarksRef} type="text" className="kiosk-input !min-h-[36px] !py-1.5 !text-sm" placeholder="Optional · Enter to save" value={data.remarks} onChange={e => set('remarks', e.target.value)} onKeyDown={handleRemarksKeyDown} />
               </label>
             </div>
             {dbLead?.transcript && (
               <div className="mt-2.5 flex items-center gap-2 text-xs">
                 <span className="text-purple-600 font-semibold">📄 Transcript ready</span>
-                <button type="button" onClick={() => setShowTranscript(true)}
-                  className="text-blue-500 underline hover:text-blue-700">View full transcript</button>
+                <button type="button" onClick={() => setShowTranscript(true)} className="text-blue-500 underline hover:text-blue-700">View full transcript</button>
               </div>
             )}
           </td>
@@ -905,39 +718,31 @@ export default function IVREntryScreen() {
   const [fileError, setFileError] = useState('');
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef(null);
-
   const [rows, setRows] = useState([]);
   const [hasImported, setHasImported] = useState(false);
-
+  // #3: clickable status filter
+  const [statusFilter, setStatusFilter] = useState(null);
+  // #5: focused row for progress tracking
+  const [focusedRowId, setFocusedRowId] = useState(null);
   const [cars, setCars] = useState([]);
   const [locations, setLocations] = useState([]);
   const [loadingCars, setLoadingCars] = useState(true);
   const [loadingLocations, setLoadingLocations] = useState(true);
-
   const interestedBtnRefs = useRef({});
 
   useEffect(() => {
     let mounted = true;
-    getAvailableCars()
-      .then(data => { if (mounted) setCars((data || []).filter(c => c?.name?.trim())); })
-      .catch(() => {})
-      .finally(() => { if (mounted) setLoadingCars(false); });
+    getAvailableCars().then(data => { if (mounted) setCars((data || []).filter(c => c?.name?.trim())); }).catch(() => {}).finally(() => { if (mounted) setLoadingCars(false); });
     return () => { mounted = false; };
   }, []);
 
   useEffect(() => {
     let mounted = true;
-    getLocations()
-      .then(data => { if (mounted) setLocations(data || []); })
-      .catch(() => {})
-      .finally(() => { if (mounted) setLoadingLocations(false); });
+    getLocations().then(data => { if (mounted) setLocations(data || []); }).catch(() => {}).finally(() => { if (mounted) setLoadingLocations(false); });
     return () => { mounted = false; };
   }, []);
 
-  // ── File upload handler ──────────────────────────────────────────────────────
-
   async function batchInsertIVRLeads(parseRowsWithMatches) {
-    // Insert all parsed rows into ivr_leads for review/transcription
     const leadsToInsert = parseRowsWithMatches.map(({ mobile, callDate, connectedToRaw, matchedSalesperson, callRecordingUrl }) => ({
       mobile_number: mobile,
       call_datetime: callDate ? new Date(callDate).toISOString() : null,
@@ -947,12 +752,7 @@ export default function IVREntryScreen() {
       call_recording_url: callRecordingUrl || null,
       review_status: 'pending',
     }));
-
-    const { data, error } = await supabase
-      .from(IVR_LEADS_TABLE)
-      .insert(leadsToInsert)
-      .select('id, call_recording_url, customer_name, model_name, fuel_type, conversation_summary, remarks, transcript, transcription_status');
-
+    const { data, error } = await supabase.from(IVR_LEADS_TABLE).insert(leadsToInsert).select('id, call_recording_url, customer_name, model_name, fuel_type, conversation_summary, remarks, transcript, transcription_status');
     if (error) throw error;
     return data || [];
   }
@@ -960,186 +760,86 @@ export default function IVREntryScreen() {
   const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const isZip = file.name.endsWith('.zip');
     const isCsv = file.name.endsWith('.csv');
-
-    if (!isZip && !isCsv) {
-      setFileError('Please upload the ZIP file downloaded from your IVR portal, or a CSV file.');
-      e.target.value = '';
-      return;
-    }
-
-    setFileError('');
-    setImporting(true);
-
+    if (!isZip && !isCsv) { setFileError('Please upload the ZIP file downloaded from your IVR portal, or a CSV file.'); e.target.value = ''; return; }
+    setFileError(''); setImporting(true);
     try {
       let text;
-
       if (isZip) {
         if (!window.JSZip) {
-          await new Promise((resolve, reject) => {
-            const script = document.createElement('script');
-            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
-            script.onload = resolve;
-            script.onerror = () => reject(new Error('Failed to load ZIP library.'));
-            document.head.appendChild(script);
-          });
+          await new Promise((resolve, reject) => { const script = document.createElement('script'); script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'; script.onload = resolve; script.onerror = () => reject(new Error('Failed to load ZIP library.')); document.head.appendChild(script); });
         }
         const arrayBuffer = await file.arrayBuffer();
         const zip = await window.JSZip.loadAsync(arrayBuffer);
         const csvFile = Object.values(zip.files).find(f => !f.dir && f.name.toLowerCase().endsWith('.csv'));
-        if (!csvFile) {
-          setFileError('No CSV file found inside the ZIP.');
-          setImporting(false);
-          e.target.value = '';
-          return;
-        }
+        if (!csvFile) { setFileError('No CSV file found inside the ZIP.'); setImporting(false); e.target.value = ''; return; }
         text = await csvFile.async('text');
-      } else {
-        text = await file.text();
-      }
+      } else { text = await file.text(); }
 
       const parsed = parseIVRFile(text);
-
-      if (parsed.length === 0) {
-        setFileError('No valid customer numbers found. Make sure the file has a CustomerNumber column.');
-        setImporting(false);
-        e.target.value = '';
-        return;
-      }
+      if (parsed.length === 0) { setFileError('No valid customer numbers found. Make sure the file has a CustomerNumber column.'); setImporting(false); e.target.value = ''; return; }
 
       const connectedPhones = parsed.map(r => r.connectedToRaw).filter(Boolean);
       const empByMobile = await fetchEmployeesByMobile(connectedPhones);
-
       const parseRowsWithMatches = parsed.map(({ mobile, callDate, connectedToRaw, callRecordingUrl }) => {
         const connectedNormalized = normalizePhone(connectedToRaw);
         const matchedSalesperson = connectedNormalized ? empByMobile.get(connectedNormalized) || null : null;
-        return {
-          mobile,
-          callDate,
-          connectedToRaw,
-          callRecordingUrl: callRecordingUrl || null,
-          matchedSalesperson,
-        };
+        return { mobile, callDate, connectedToRaw, callRecordingUrl: callRecordingUrl || null, matchedSalesperson };
       });
 
-      // Insert all rows to ivr_leads immediately for review/transcription
       const insertedLeads = await batchInsertIVRLeads(parseRowsWithMatches);
+      if (insertedLeads.length === 0) { setFileError('Failed to insert leads. Please try again.'); setImporting(false); e.target.value = ''; return; }
 
-      if (insertedLeads.length === 0) {
-        setFileError('Failed to insert leads. Please try again.');
-        setImporting(false);
-        e.target.value = '';
-        return;
-      }
-
-      // Create UI rows with actual ivr_leads IDs for promotion workflow
       const newRows = insertedLeads.map((lead, index) => {
         const parsed = parseRowsWithMatches[index];
         const matched = parsed.matchedSalesperson;
         return {
-          id: String(lead.id), // Use actual ivr_leads.id for database operations
-          ivrLeadsId: lead.id,
-          index,
-          mobile: parsed.mobile,
-          callDate: parsed.callDate,
-          connectedToRaw: parsed.connectedToRaw,
-          callRecordingUrl: lead.call_recording_url || null,
-          dbLead: {
-            id: lead.id,
-            call_recording_url: lead.call_recording_url || null,
-            customer_name: lead.customer_name || null,
-            model_name: lead.model_name || null,
-            fuel_type: lead.fuel_type || null,
-            conversation_summary: lead.conversation_summary || null,
-            remarks: lead.remarks || null,
-            transcript: lead.transcript || null,
-            transcription_status: lead.transcription_status || null,
-          },
-          matchedSalesperson: matched,
-          matchedSalespersonId: matched?.id ? String(matched.id) : '',
-          matchedLocationId: matched?.location_id ? String(matched.location_id) : '',
-          status: STATUS.PENDING,
-          savedSummary: null,
-          errorMessage: null,
+          id: String(lead.id), ivrLeadsId: lead.id, index, mobile: parsed.mobile, callDate: parsed.callDate, connectedToRaw: parsed.connectedToRaw, callRecordingUrl: lead.call_recording_url || null,
+          dbLead: { id: lead.id, call_recording_url: lead.call_recording_url || null, customer_name: lead.customer_name || null, model_name: lead.model_name || null, fuel_type: lead.fuel_type || null, conversation_summary: lead.conversation_summary || null, remarks: lead.remarks || null, transcript: lead.transcript || null, transcription_status: lead.transcription_status || null },
+          matchedSalesperson: matched, matchedSalespersonId: matched?.id ? String(matched.id) : '', matchedLocationId: matched?.location_id ? String(matched.location_id) : '',
+          status: STATUS.PENDING, savedSummary: null, errorMessage: null,
         };
       });
 
-      setRows(newRows);
-      setHasImported(true);
-
+      setRows(newRows); setHasImported(true); setStatusFilter(null);
       setTimeout(() => {
         const firstId = newRows[0]?.id;
-        if (firstId) interestedBtnRefs.current[firstId]?.focus();
+        if (firstId) { interestedBtnRefs.current[firstId]?.focus(); setFocusedRowId(firstId); }
       }, 100);
 
-      // Trigger transcription asynchronously for leads with recordings
       insertedLeads.forEach(lead => {
         if (lead.call_recording_url && lead.id) {
-          supabase.functions
-            .invoke('transcribe-ivr-call', { body: { leadId: lead.id } })
-            .catch((err) => {
-              console.error(`Failed to trigger transcription for lead ${lead.id}:`, err);
-            });
+          supabase.functions.invoke('transcribe-ivr-call', { body: { leadId: lead.id } }).catch((err) => { console.error(`Failed to trigger transcription for lead ${lead.id}:`, err); });
         }
       });
-
-    } catch (err) {
-      setFileError(err?.message || 'Failed to process file.');
-    } finally {
-      setImporting(false);
-      e.target.value = '';
-    }
+    } catch (err) { setFileError(err?.message || 'Failed to process file.'); }
+    finally { setImporting(false); e.target.value = ''; }
   };
 
-  const handleReset = () => {
-    setRows([]);
-    setHasImported(false);
-    setFileError('');
-    interestedBtnRefs.current = {};
-  };
+  const handleReset = () => { setRows([]); setHasImported(false); setFileError(''); setStatusFilter(null); setFocusedRowId(null); interestedBtnRefs.current = {}; };
 
   useEffect(() => {
     if (activeTab !== 'entry' || !hasImported || rows.length === 0) return;
     const leadIds = rows.map(r => r.ivrLeadsId).filter(Boolean);
     if (!leadIds.length) return;
-
     let mounted = true;
     const syncRowsFromDB = async () => {
-      const { data, error } = await supabase
-        .from(IVR_LEADS_TABLE)
-        .select('id, call_recording_url, customer_name, model_name, fuel_type, conversation_summary, remarks, transcript, transcription_status')
-        .in('id', leadIds);
-
-      if (error) {
-        console.error('Failed to sync IVR rows:', error);
-        return;
-      }
+      const { data, error } = await supabase.from(IVR_LEADS_TABLE).select('id, call_recording_url, customer_name, model_name, fuel_type, conversation_summary, remarks, transcript, transcription_status').in('id', leadIds);
+      if (error) { console.error('Failed to sync IVR rows:', error); return; }
       if (!mounted) return;
-
       const byId = new Map((data || []).map(item => [item.id, item]));
       setRows(prev => prev.map(r => {
         if (!r.ivrLeadsId) return r;
         const dbLead = byId.get(r.ivrLeadsId);
         if (!dbLead) return r;
-        return {
-          ...r,
-          dbLead,
-          callRecordingUrl: r.callRecordingUrl || dbLead.call_recording_url || null,
-        };
+        return { ...r, dbLead, callRecordingUrl: r.callRecordingUrl || dbLead.call_recording_url || null };
       }));
     };
-
     syncRowsFromDB();
     const timer = setInterval(syncRowsFromDB, 8000);
-    return () => {
-      mounted = false;
-      clearInterval(timer);
-    };
+    return () => { mounted = false; clearInterval(timer); };
   }, [activeTab, hasImported, rows.length]);
-
-  // ── Row actions ──────────────────────────────────────────────────────────────
 
   const setRowStatus = useCallback((rowId, status, extra = {}) => {
     setRows(prev => prev.map(r => r.id === rowId ? { ...r, status, ...extra } : r));
@@ -1149,7 +849,7 @@ export default function IVREntryScreen() {
     setRows(currentRows => {
       const afterIndex = currentRows.findIndex(r => r.id === afterRowId);
       const nextPending = currentRows.find((r, i) => i > afterIndex && r.status === STATUS.PENDING);
-      if (nextPending) setTimeout(() => interestedBtnRefs.current[nextPending.id]?.focus(), 60);
+      if (nextPending) { setTimeout(() => { interestedBtnRefs.current[nextPending.id]?.focus(); setFocusedRowId(nextPending.id); }, 60); }
       return currentRows;
     });
   }, []);
@@ -1157,23 +857,10 @@ export default function IVREntryScreen() {
   const handleMarkUninterested = useCallback(async (rowId) => {
     const row = rows.find(r => r.id === rowId);
     if (!row) return;
-    
     setRowStatus(rowId, STATUS.UNINTERESTED);
-
-    // If row exists in ivr_leads, mark it as uninterested
     if (row.ivrLeadsId) {
-      try {
-        await supabase
-          .from(IVR_LEADS_TABLE)
-          .update({
-            review_status: 'uninterested',
-            reviewed_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', row.ivrLeadsId);
-      } catch (err) {
-        console.error(`Failed to mark lead ${row.ivrLeadsId} as uninterested:`, err);
-      }
+      try { await supabase.from(IVR_LEADS_TABLE).update({ review_status: 'uninterested', reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', row.ivrLeadsId); }
+      catch (err) { console.error(`Failed to mark lead ${row.ivrLeadsId} as uninterested:`, err); }
     }
   }, [rows, setRowStatus]);
 
@@ -1183,94 +870,51 @@ export default function IVREntryScreen() {
     setRowStatus(rowId, STATUS.SAVING);
     try {
       let ivrLeadId = row.ivrLeadsId;
-      let ivrLead = null;
-
-      // If row doesn't have an ivr_leads ID, create the review record first (manual entry case)
       if (!ivrLeadId) {
-        const savedLead = await createIVRLead({
-          customer_name: data.customerName.trim() || null,
-          mobile_number: row.mobile,
-          model_name: data.modelName || null,
-          fuel_type: data.fuelType || null,
-          salesperson_id: data.salespersonId || null,
-          location_id: data.locationId || null,
-          remarks: data.remarks.trim() || null,
-          transcript: data.transcript || null,
-          conversation_summary: data.conversationSummary?.trim() || null,
-          call_datetime: row.callDate ? new Date(row.callDate).toISOString() : null,
-          call_recording_url: row.callRecordingUrl || null,
-        });
-
-        if (row.callRecordingUrl && savedLead?.id) {
-          supabase.functions
-            .invoke('transcribe-ivr-call', { body: { leadId: savedLead.id } })
-            .catch((err) => {
-              console.error('Failed to trigger transcribe-ivr-call:', err);
-            });
-        }
-
+        const savedLead = await createIVRLead({ customer_name: data.customerName.trim() || null, mobile_number: row.mobile, model_name: data.modelName || null, fuel_type: data.fuelType || null, salesperson_id: data.salespersonId || null, location_id: data.locationId || null, remarks: data.remarks.trim() || null, transcript: data.transcript || null, conversation_summary: data.conversationSummary?.trim() || null, call_datetime: row.callDate ? new Date(row.callDate).toISOString() : null, call_recording_url: row.callRecordingUrl || null });
+        if (row.callRecordingUrl && savedLead?.id) { supabase.functions.invoke('transcribe-ivr-call', { body: { leadId: savedLead.id } }).catch(() => {}); }
         ivrLeadId = savedLead.id;
-        ivrLead = savedLead;
       } else {
-        // Row already exists in ivr_leads (from file upload)
-        // Fetch to check if already promoted
-        const { data: existing } = await supabase
-          .from(IVR_LEADS_TABLE)
-          .select('final_ai_lead_id')
-          .eq('id', ivrLeadId)
-          .single();
-
-        if (existing?.final_ai_lead_id) {
-          // Already promoted, skip
-          setRowStatus(rowId, STATUS.SAVED, { savedSummary: 'Already promoted to AI' });
-          return;
-        }
+        const { data: existing } = await supabase.from(IVR_LEADS_TABLE).select('final_ai_lead_id').eq('id', ivrLeadId).single();
+        if (existing?.final_ai_lead_id) { setRowStatus(rowId, STATUS.SAVED, { savedSummary: 'Already promoted to AI' }); return; }
       }
-
-      // Promote to ai_leads
-      const promotionPayload = {
-        customer_name: data.customerName?.trim() || row.dbLead?.customer_name || null,
-        mobile_number: row.mobile,
-        model_name: data.modelName || row.dbLead?.model_name || null,
-        fuel_type: data.fuelType || row.dbLead?.fuel_type || null,
-        salesperson_id: data.salespersonId || null,
-        location_id: data.locationId || null,
-        remarks: data.remarks?.trim() || row.dbLead?.remarks || null,
-        conversation_summary: data.conversationSummary?.trim() || row.dbLead?.conversation_summary || null,
-        call_datetime: row.callDate ? new Date(row.callDate).toISOString() : null,
-      };
-
+      const promotionPayload = { customer_name: data.customerName?.trim() || row.dbLead?.customer_name || null, mobile_number: row.mobile, model_name: data.modelName || row.dbLead?.model_name || null, fuel_type: data.fuelType || row.dbLead?.fuel_type || null, salesperson_id: data.salespersonId || null, location_id: data.locationId || null, remarks: data.remarks?.trim() || row.dbLead?.remarks || null, conversation_summary: data.conversationSummary?.trim() || row.dbLead?.conversation_summary || null, call_datetime: row.callDate ? new Date(row.callDate).toISOString() : null };
       await promoteIVRLeadToAI(ivrLeadId, promotionPayload);
-
       const parts = [];
       if (data.customerName?.trim()) parts.push(data.customerName.trim());
       if (data.modelName) parts.push(data.modelName);
       if (data.fuelType) parts.push(FUEL_OPTIONS.find(f => f.code === data.fuelType)?.label || data.fuelType);
       if (data.remarks?.trim()) parts.push(`"${data.remarks.trim()}"`);
       setRowStatus(rowId, STATUS.SAVED, { savedSummary: parts.join(' · ') || 'Promoted to AI' });
-    } catch (error) {
-      setRowStatus(rowId, STATUS.ERROR, { errorMessage: error?.message || 'Save failed.' });
-    }
+    } catch (error) { setRowStatus(rowId, STATUS.ERROR, { errorMessage: error?.message || 'Save failed.' }); }
   }, [rows, setRowStatus]);
 
-  const counts = rows.reduce(
-    (acc, r) => {
-      if (r.status === STATUS.SAVED) acc.saved++;
-      else if (r.status === STATUS.UNINTERESTED) acc.uninterested++;
-      else acc.pending++;
-      return acc;
-    },
-    { saved: 0, uninterested: 0, pending: 0 }
-  );
-
+  const counts = rows.reduce((acc, r) => { if (r.status === STATUS.SAVED) acc.saved++; else if (r.status === STATUS.UNINTERESTED) acc.uninterested++; else acc.pending++; return acc; }, { saved: 0, uninterested: 0, pending: 0 });
   const matchedCount = rows.filter(r => r.matchedSalesperson).length;
+  const reviewedCount = counts.saved + counts.uninterested;
+  const progressPct = rows.length > 0 ? Math.round((reviewedCount / rows.length) * 100) : 0;
+
+  // #3: filter rows by clicked status card
+  const visibleRows = statusFilter ? rows.filter(r => {
+    if (statusFilter === 'pending') return r.status === STATUS.PENDING;
+    if (statusFilter === 'saved') return r.status === STATUS.SAVED;
+    if (statusFilter === 'uninterested') return r.status === STATUS.UNINTERESTED;
+    if (statusFilter === 'matched') return !!r.matchedSalesperson;
+    return true;
+  }) : rows;
+
+  const statCards = [
+    { key: null, label: 'Total', value: rows.length, color: 'bg-slate-100 text-slate-700', activeColor: 'bg-slate-800 text-white' },
+    { key: 'matched', label: 'Matched', value: matchedCount, color: 'bg-emerald-50 text-emerald-700', activeColor: 'bg-emerald-700 text-white' },
+    { key: 'pending', label: 'Pending', value: counts.pending, color: 'bg-orange-50 text-orange-600', activeColor: 'bg-orange-500 text-white' },
+    { key: 'saved', label: 'Saved', value: counts.saved, color: 'bg-green-50 text-green-700', activeColor: 'bg-green-600 text-white' },
+    { key: 'uninterested', label: 'Uninterested', value: counts.uninterested, color: 'bg-red-50 text-red-600', activeColor: 'bg-red-600 text-white' },
+  ];
 
   return (
     <section className="kiosk-card mx-auto w-full rounded-2xl p-6 shadow-lg" style={{ maxWidth: '1200px' }}>
       <h1 className="kiosk-title !mb-1 text-4xl">IVR Lead Entry</h1>
-      <p className="mb-5 text-base text-slate-600">
-        Upload your IVR call report ZIP. Leads are saved first, then transcription runs in the background.
-      </p>
+      <p className="mb-5 text-base text-slate-600">Upload your IVR call report ZIP. Leads are saved first, then transcription runs in the background.</p>
 
       <div className="mb-6 flex gap-1 rounded-2xl bg-slate-100 p-1 w-fit">
         {[{ id: 'entry', label: '+ New Entry' }, { id: 'all', label: 'All Entries' }].map(tab => (
@@ -1288,24 +932,11 @@ export default function IVREntryScreen() {
               className="rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 px-8 py-12 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors"
               onClick={() => fileInputRef.current?.click()}
               onDragOver={e => e.preventDefault()}
-              onDrop={e => {
-                e.preventDefault();
-                const file = e.dataTransfer.files?.[0];
-                if (file) {
-                  const dt = new DataTransfer();
-                  dt.items.add(file);
-                  fileInputRef.current.files = dt.files;
-                  handleFileChange({ target: fileInputRef.current });
-                }
-              }}
+              onDrop={e => { e.preventDefault(); const file = e.dataTransfer.files?.[0]; if (file) { const dt = new DataTransfer(); dt.items.add(file); fileInputRef.current.files = dt.files; handleFileChange({ target: fileInputRef.current }); } }}
             >
               <div className="text-4xl mb-3">📂</div>
-              <p className="text-lg font-semibold text-slate-700 mb-1">
-                {importing ? 'Processing file…' : 'Upload IVR Call Report (ZIP or CSV)'}
-              </p>
-              <p className="text-sm text-slate-500 mb-4">
-                Click to browse or drag &amp; drop
-              </p>
+              <p className="text-lg font-semibold text-slate-700 mb-1">{importing ? 'Processing file…' : 'Upload IVR Call Report (ZIP or CSV)'}</p>
+              <p className="text-sm text-slate-500 mb-4">Click to browse or drag &amp; drop</p>
               <div className="inline-flex items-center gap-2 text-xs text-slate-400 bg-white rounded-xl border border-slate-200 px-4 py-2">
                 <span>Required columns:</span>
                 <code className="bg-slate-100 rounded px-1">CallDate</code>
@@ -1315,39 +946,63 @@ export default function IVREntryScreen() {
               </div>
               <input ref={fileInputRef} type="file" accept=".zip,.csv" className="hidden" onChange={handleFileChange} />
             </div>
-
-            {fileError && (
-              <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{fileError}</div>
-            )}
-
-            <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800">
-              Upload the <strong>ZIP file</strong> directly from your IVR portal. Leads will be saved and transcription will start automatically.
-            </div>
+            {fileError && <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{fileError}</div>}
+            <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800">Upload the <strong>ZIP file</strong> directly from your IVR portal. Leads will be saved and transcription will start automatically.</div>
           </div>
         ) : (
           <div className="space-y-3">
-            <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-slate-500 bg-slate-50 rounded-xl px-4 py-2.5 border border-slate-200">
-              <span><kbd className="bg-white border border-slate-300 rounded px-1.5 py-0.5 font-mono text-[10px]">Enter</kbd> · next field</span>
-              <span><kbd className="bg-white border border-slate-300 rounded px-1.5 py-0.5 font-mono text-[10px]">Tab</kbd> · move forward</span>
-              <span><kbd className="bg-white border border-slate-300 rounded px-1.5 py-0.5 font-mono text-[10px]">↑ ↓</kbd> · dropdown</span>
-              <span><kbd className="bg-white border border-slate-300 rounded px-1.5 py-0.5 font-mono text-[10px]">U</kbd> · Uninterested</span>
-              <span><kbd className="bg-white border border-slate-300 rounded px-1.5 py-0.5 font-mono text-[10px]">Enter</kbd> on Remarks · Save &amp; next</span>
+
+            {/* #5: Progress bar */}
+            {rows.length > 0 && reviewedCount < rows.length && (
+              <div className="flex items-center gap-3 bg-slate-50 rounded-xl px-4 py-2.5 border border-slate-200">
+                <span className="text-xs text-slate-500 whitespace-nowrap">
+                  Reviewed <span className="font-semibold text-slate-800">{reviewedCount}</span> of <span className="font-semibold text-slate-800">{rows.length}</span>
+                </span>
+                <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                  <div className="h-full bg-blue-500 rounded-full transition-all duration-500" style={{ width: `${progressPct}%` }} />
+                </div>
+                <span className="text-xs text-slate-400 whitespace-nowrap">{counts.pending} remaining</span>
+              </div>
+            )}
+            {rows.length > 0 && reviewedCount === rows.length && (
+              <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5 text-sm text-emerald-700 font-semibold">
+                ✓ All {rows.length} leads reviewed!
+              </div>
+            )}
+
+            {/* #6: Compact keyboard hints (no longer a full-width bar) */}
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-400">
+              <span><kbd className="bg-white border border-slate-200 rounded px-1 font-mono text-[10px]">Enter</kbd> next field</span>
+              <span><kbd className="bg-white border border-slate-200 rounded px-1 font-mono text-[10px]">Tab</kbd> forward</span>
+              <span><kbd className="bg-white border border-slate-200 rounded px-1 font-mono text-[10px]">↑↓</kbd> dropdown</span>
+              <span><kbd className="bg-white border border-slate-200 rounded px-1 font-mono text-[10px]">U</kbd> uninterested</span>
+              <span><kbd className="bg-white border border-slate-200 rounded px-1 font-mono text-[10px]">Enter</kbd> on remarks saves</span>
             </div>
 
+            {/* #3: Clickable stat filter cards */}
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap gap-2 text-sm">
-                <span className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-600 font-semibold">Total: {rows.length}</span>
-                <span className="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 font-semibold">Matched: {matchedCount}</span>
-                <span className="px-3 py-1.5 rounded-xl bg-orange-50 text-orange-600 font-semibold">Pending: {counts.pending}</span>
-                <span className="px-3 py-1.5 rounded-xl bg-green-50 text-green-700 font-semibold">Saved: {counts.saved}</span>
-                <span className="px-3 py-1.5 rounded-xl bg-red-50 text-red-600 font-semibold">Uninterested: {counts.uninterested}</span>
+              <div className="flex flex-wrap gap-2">
+                {statCards.map(card => {
+                  const isActive = statusFilter === card.key;
+                  return (
+                    <button key={String(card.key)} type="button"
+                      onClick={() => setStatusFilter(isActive ? null : card.key)}
+                      className={`px-3 py-1.5 rounded-xl text-sm font-semibold transition-all border ${isActive ? `${card.activeColor} border-transparent shadow-sm` : `${card.color} border-transparent hover:border-slate-200 hover:shadow-sm`}`}
+                      title={card.key ? `Filter by ${card.label}` : 'Show all'}>
+                      {card.label}: {card.value}{isActive && <span className="ml-1 opacity-70">✕</span>}
+                    </button>
+                  );
+                })}
               </div>
-              <button type="button"
-                className="btn border border-slate-300 text-slate-600 bg-white hover:bg-slate-50 text-sm px-4 h-10 rounded-xl"
-                onClick={handleReset}>
-                ← Upload New File
-              </button>
+              <button type="button" className="btn border border-slate-300 text-slate-600 bg-white hover:bg-slate-50 text-sm px-4 h-10 rounded-xl" onClick={handleReset}>← Upload New File</button>
             </div>
+
+            {statusFilter && (
+              <p className="text-xs text-slate-400">
+                Showing {visibleRows.length} of {rows.length} leads ·{' '}
+                <button type="button" onClick={() => setStatusFilter(null)} className="text-blue-500 underline">Clear filter</button>
+              </p>
+            )}
 
             <div className="overflow-x-auto rounded-2xl border border-slate-200">
               <table className="walkin-table !mt-0">
@@ -1363,7 +1018,7 @@ export default function IVREntryScreen() {
                     <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-right">Actions</th>
                   </tr>
                 </thead>
-                {rows.map(row => (
+                {visibleRows.map(row => (
                   <IVRRow
                     key={row.id}
                     row={row}
@@ -1374,10 +1029,8 @@ export default function IVREntryScreen() {
                     onMarkUninterested={handleMarkUninterested}
                     onSaveInterested={handleSaveInterested}
                     onFocusNext={() => focusNextPendingRow(row.id)}
-                    interestedBtnRef={el => {
-                      if (el) interestedBtnRefs.current[row.id] = el;
-                      else delete interestedBtnRefs.current[row.id];
-                    }}
+                    isFocused={focusedRowId === row.id}
+                    interestedBtnRef={el => { if (el) interestedBtnRefs.current[row.id] = el; else delete interestedBtnRefs.current[row.id]; }}
                   />
                 ))}
               </table>
@@ -1386,9 +1039,7 @@ export default function IVREntryScreen() {
         )
       )}
 
-      {activeTab === 'all' && (
-        <AllEntriesTab cars={cars} locations={locations} />
-      )}
+      {activeTab === 'all' && <AllEntriesTab cars={cars} locations={locations} />}
     </section>
   );
 }
