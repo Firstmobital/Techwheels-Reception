@@ -24,7 +24,7 @@ export async function createIVRLead({
       mobile_number,
       model_name,
       salesperson_id: salesperson_id || null,
-      location_id,
+      location_id: location_id || null,
       remarks,
       call_datetime: call_datetime || null,
       lead_source: 'IVR',
