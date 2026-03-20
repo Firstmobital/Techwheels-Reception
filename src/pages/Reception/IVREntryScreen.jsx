@@ -5,6 +5,16 @@ import {
   getLocations,
   getSalesPersonsByLocation
 } from '../../services/walkinService';
+
+// Fetch fuel types from the fuel_type lookup table
+async function getFuelTypes(supabaseClient) {
+  const { data, error } = await supabaseClient
+    .from('fuel_type')
+    .select('id, code, label')
+    .order('id', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
 import { supabase } from '../../services/supabaseClient';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -31,10 +41,19 @@ const DATE_FILTERS = [
 const BLANK_ROW_DATA = {
   customerName: '',
   modelName: '',
+  fuelType: '',        // one of: PETROL | DIESEL | EV | CNG | ''
   locationId: '',
   salespersonId: '',
   remarks: '',
 };
+
+// Fuel options matching the fuel_type table codes
+const FUEL_OPTIONS = [
+  { code: 'PETROL', label: 'Petrol' },
+  { code: 'DIESEL', label: 'Diesel' },
+  { code: 'EV',     label: 'EV' },
+  { code: 'CNG',    label: 'CNG' },
+];
 
 // ─── CSV / number helpers ─────────────────────────────────────────────────────
 
@@ -188,7 +207,7 @@ function normalizeOptyStatus(entry) {
 async function fetchIVREntries(dateFilter) {
   let query = supabase
     .from(AI_LEADS_TABLE)
-    .select('id, customer_name, mobile_number, model_name, salesperson_id, location_id, remarks, lead_source, opty_status, lead_disposition, call_datetime, created_at, updated_at')
+    .select('id, customer_name, mobile_number, model_name, fuel_type, salesperson_id, location_id, remarks, lead_source, opty_status, lead_disposition, call_datetime, created_at, updated_at')
     .eq('lead_source', 'IVR')
     .order('created_at', { ascending: false })
     .range(0, 9999);
@@ -294,6 +313,7 @@ function AllEntriesRow({ entry, cars, locations, onSaved }) {
     setDraft({
       customer_name: entry.customer_name || '',
       model_name: entry.model_name || '',
+      fuel_type: entry.fuel_type || '',
       location_id: entry.location_id || '',
       salesperson_id: entry.salesperson_id || '',
       remarks: entry.remarks || '',
@@ -311,6 +331,7 @@ function AllEntriesRow({ entry, cars, locations, onSaved }) {
       await updateIVREntry(entry.id, {
         customer_name: draft.customer_name?.trim() || null,
         model_name: draft.model_name || null,
+        fuel_type: draft.fuel_type || null,
         location_id: draft.location_id || null,
         salesperson_id: draft.salesperson_id || null,
         remarks: draft.remarks?.trim() || null,
@@ -344,6 +365,13 @@ function AllEntriesRow({ entry, cars, locations, onSaved }) {
             value={draft.model_name} onChange={(e) => setD('model_name', e.target.value)}>
             <option value="">— Model —</option>
             {cars.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+          </select>
+        </td>
+        <td className="px-3 py-2">
+          <select className="kiosk-select !min-h-[34px] !py-1 !text-sm w-full"
+            value={draft.fuel_type} onChange={(e) => setD('fuel_type', e.target.value)}>
+            <option value="">— Fuel —</option>
+            {FUEL_OPTIONS.map((f) => <option key={f.code} value={f.code}>{f.label}</option>)}
           </select>
         </td>
         <td className="px-3 py-2">
@@ -393,6 +421,11 @@ function AllEntriesRow({ entry, cars, locations, onSaved }) {
       <td className="px-3 py-2.5 text-sm text-slate-800">{entry.customer_name || <span className="text-slate-300">—</span>}</td>
       <td className="px-3 py-2.5 text-sm text-slate-700 font-mono">{entry.mobile_number}</td>
       <td className="px-3 py-2.5 text-sm text-slate-700">{entry.model_name || <span className="text-slate-300">—</span>}</td>
+      <td className="px-3 py-2.5 text-sm text-slate-700">
+        {entry.fuel_type
+          ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold">{FUEL_OPTIONS.find(f => f.code === entry.fuel_type)?.label || entry.fuel_type}</span>
+          : <span className="text-slate-300">—</span>}
+      </td>
       <td className="px-3 py-2.5 text-sm text-slate-700">{entry.location_name}</td>
       <td className="px-3 py-2.5 text-sm text-slate-700">{entry.salesperson_name}</td>
       <td className="px-3 py-2.5 text-xs text-slate-500 max-w-[160px] truncate" title={entry.remarks || ''}>
@@ -483,6 +516,7 @@ function AllEntriesTab({ cars, locations }) {
                 <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Customer Name</th>
                 <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Mobile</th>
                 <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Model</th>
+                <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Fuel</th>
                 <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Branch</th>
                 <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Sales Advisor</th>
                 <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Remarks</th>
@@ -639,7 +673,7 @@ function IVRRow({
 
       {expanded && !isDone && (
         <tr className="bg-slate-50 border-b border-slate-200">
-          <td colSpan={7} className="px-4 py-3">
+          <td colSpan={8} className="px-4 py-3">
             <p className="text-[11px] text-slate-400 mb-2.5">
               <kbd className="bg-white border border-slate-200 rounded px-1 font-mono">Enter</kbd> next &nbsp;·&nbsp;
               <kbd className="bg-white border border-slate-200 rounded px-1 font-mono">↑↓</kbd> dropdown &nbsp;·&nbsp;
@@ -660,6 +694,14 @@ function IVRRow({
                   value={data.modelName} onChange={(e) => set('modelName', e.target.value)} disabled={loadingCars}>
                   <option value="">{loadingCars ? 'Loading…' : 'Optional'}</option>
                   {cars.map((car) => <option key={car.id} value={car.name}>{car.name}</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
+                Fuel <span className="font-normal text-slate-400">(optional)</span>
+                <select className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
+                  value={data.fuelType} onChange={(e) => set('fuelType', e.target.value)}>
+                  <option value="">Optional</option>
+                  {FUEL_OPTIONS.map((f) => <option key={f.code} value={f.code}>{f.label}</option>)}
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
@@ -869,6 +911,7 @@ export default function IVREntryScreen() {
         customer_name: data.customerName.trim() || null,
         mobile_number: row.mobile,
         model_name: data.modelName || null,
+        fuel_type: data.fuelType || null,
         salesperson_id: data.salespersonId || null,
         location_id: data.locationId || null,
         remarks: data.remarks.trim() || null,
@@ -877,6 +920,7 @@ export default function IVREntryScreen() {
       const parts = [];
       if (data.customerName.trim()) parts.push(data.customerName.trim());
       if (data.modelName) parts.push(data.modelName);
+      if (data.fuelType) parts.push(FUEL_OPTIONS.find(f => f.code === data.fuelType)?.label || data.fuelType);
       if (data.remarks.trim()) parts.push(`"${data.remarks.trim()}"`);
       setRowStatus(rowId, STATUS.SAVED, { savedSummary: parts.join(' · ') || 'Saved to AI queue' });
     } catch (error) {

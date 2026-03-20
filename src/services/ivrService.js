@@ -12,6 +12,7 @@ export async function createIVRLead({
   customer_name,
   mobile_number,
   model_name,
+  fuel_type,       // one of: PETROL | DIESEL | EV | CNG | null
   salesperson_id,
   location_id,
   remarks,
@@ -23,6 +24,7 @@ export async function createIVRLead({
       customer_name,
       mobile_number,
       model_name,
+      fuel_type: fuel_type || null,
       salesperson_id: salesperson_id || null,
       location_id: location_id || null,
       remarks,
