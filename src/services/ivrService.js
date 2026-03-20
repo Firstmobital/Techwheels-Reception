@@ -17,7 +17,9 @@ export async function createIVRLead({
   location_id,
   remarks,
   transcript,      // full Whisper transcript text | null
+  conversation_summary, // short extracted summary | null
   call_datetime,   // ISO string or null — date/time of the original IVR call
+  call_recording_url, // IVR call recording URL | null
 }) {
   const { data, error } = await supabase
     .from(AI_LEADS_TABLE)
@@ -30,7 +32,10 @@ export async function createIVRLead({
       location_id: location_id || null,
       remarks,
       transcript: transcript || null,
+      conversation_summary: conversation_summary || null,
       call_datetime: call_datetime || null,
+      call_recording_url: call_recording_url || null,
+      transcription_status: call_recording_url ? 'pending' : null,
       lead_source: 'IVR',
       lead_disposition: 'active',
       opty_status: 'pending',

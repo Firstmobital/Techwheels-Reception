@@ -13,9 +13,6 @@ const AI_LEADS_TABLE = 'ai_leads';
 const EMPLOYEES_TABLE = 'employees';
 const LOCATIONS_TABLE = 'locations';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
 const STATUS = {
   PENDING: 'pending',
   SAVING: 'saving',
@@ -24,12 +21,6 @@ const STATUS = {
   ERROR: 'error',
 };
 
-const AI_STATUS = {
-  TRANSCRIBING: 'transcribing',
-  EXTRACTING: 'extracting',
-  DONE: 'done',
-  FAILED: 'failed',
-};
 
 const DATE_FILTERS = [
   { value: 'today', label: 'Today' },
@@ -44,6 +35,7 @@ const BLANK_ROW_DATA = {
   fuelType: '',
   locationId: '',
   salespersonId: '',
+  conversationSummary: '',
   remarks: '',
   transcript: '',
 };
@@ -54,36 +46,6 @@ const FUEL_OPTIONS = [
   { code: 'EV',     label: 'EV' },
   { code: 'CNG',    label: 'CNG' },
 ];
-
-// ─── AI Pipeline (via Supabase Edge Function) ─────────────────────────────────
-//
-// All audio fetching and API calls happen server-side in the Edge Function,
-// which avoids the CORS block on the Waybeo S3 bucket.
-
-async function callTranscribeEdgeFunction(recordingUrl, availableCars, hasPhoneMatch) {
-  const carList = availableCars.map(c => c.name).join(', ');
-
-  const res = await fetch(
-    `${SUPABASE_URL}/functions/v1/ivr-transcribe`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-      },
-      body: JSON.stringify({ recordingUrl, carList, hasPhoneMatch }),
-    }
-  );
-
-  const data = await res.json();
-
-  if (!res.ok || data.error) {
-    throw new Error(data.error || `Edge function error (${res.status})`);
-  }
-
-  // Returns: { transcript, customerName, caName, modelName, fuelType, summary }
-  return data;
-}
 
 // ─── CSV / number helpers ─────────────────────────────────────────────────────
 
@@ -194,6 +156,14 @@ function normalizeOptyStatus(entry) {
   return { label: 'Pending', color: 'bg-orange-100 text-orange-600' };
 }
 
+function normalizeTranscriptionStatus(entry) {
+  const status = String(entry.transcription_status || '').trim().toLowerCase();
+  if (status === 'processing') return { label: 'Processing', color: 'bg-blue-100 text-blue-700' };
+  if (status === 'completed') return { label: 'Completed', color: 'bg-emerald-100 text-emerald-700' };
+  if (status === 'failed') return { label: 'Failed', color: 'bg-red-100 text-red-700' };
+  return { label: 'Pending', color: 'bg-slate-100 text-slate-600' };
+}
+
 // ─── Transcript viewer modal ──────────────────────────────────────────────────
 
 function TranscriptModal({ transcript, onClose }) {
@@ -219,7 +189,7 @@ function TranscriptModal({ transcript, onClose }) {
 async function fetchIVREntries(dateFilter) {
   let query = supabase
     .from(AI_LEADS_TABLE)
-    .select('id, customer_name, mobile_number, model_name, fuel_type, salesperson_id, location_id, remarks, transcript, lead_source, opty_status, lead_disposition, call_datetime, created_at, updated_at')
+    .select('id, customer_name, mobile_number, model_name, fuel_type, salesperson_id, location_id, remarks, conversation_summary, transcript, transcription_status, transcription_error, lead_source, opty_status, lead_disposition, call_datetime, created_at, updated_at')
     .eq('lead_source', 'IVR')
     .order('created_at', { ascending: false })
     .range(0, 9999);
@@ -348,6 +318,7 @@ function AllEntriesRow({ entry, cars, locations, onSaved }) {
   };
 
   const { label: statusLabel, color: statusColor } = normalizeOptyStatus(entry);
+  const { label: txLabel, color: txColor } = normalizeTranscriptionStatus(entry);
   const callDateDisplay = formatCallDate(entry.call_datetime);
 
   if (editing) {
@@ -439,14 +410,25 @@ function AllEntriesRow({ entry, cars, locations, onSaved }) {
       <td className="px-3 py-2.5 text-xs text-slate-500 max-w-[160px] truncate" title={entry.remarks || ''}>
         {entry.remarks || <span className="text-slate-300">—</span>}
       </td>
-      <td className="px-3 py-2.5 text-xs max-w-[120px]">
-        {entry.transcript ? (
-          <>
-            <button type="button" onClick={() => setShowTranscript(true)}
-              className="text-blue-500 underline hover:text-blue-700">View transcript</button>
-            {showTranscript && <TranscriptModal transcript={entry.transcript} onClose={() => setShowTranscript(false)} />}
-          </>
-        ) : <span className="text-slate-300">—</span>}
+      <td className="px-3 py-2.5 text-xs max-w-[180px]">
+        <div className="flex flex-col gap-1">
+          <span className={`w-fit text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${txColor}`}>{txLabel}</span>
+          {entry.transcript ? (
+            <>
+              <button type="button" onClick={() => setShowTranscript(true)}
+                className="text-blue-500 underline hover:text-blue-700">View transcript</button>
+              {showTranscript && <TranscriptModal transcript={entry.transcript} onClose={() => setShowTranscript(false)} />}
+            </>
+          ) : (
+            <span className="text-slate-300">—</span>
+          )}
+          {entry.conversation_summary && (
+            <span className="text-[10px] text-slate-400 truncate" title={entry.conversation_summary}>{entry.conversation_summary}</span>
+          )}
+          {entry.transcription_status === 'failed' && entry.transcription_error && (
+            <span className="text-[10px] text-red-500 truncate" title={entry.transcription_error}>{entry.transcription_error}</span>
+          )}
+        </div>
       </td>
       <td className="px-3 py-2.5"><span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${statusColor}`}>{statusLabel}</span></td>
       <td className="px-3 py-2.5"><span className="text-[11px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 font-semibold">{normalizeLeadSource(entry.lead_source)}</span></td>
@@ -577,23 +559,6 @@ function IVRRow({
   const modelRef = useRef(null);
   const remarksRef = useRef(null);
 
-  // When AI result arrives on row, auto-fill fields and expand form
-  useEffect(() => {
-    if (!row.aiResult) return;
-    const { customerName, caName, modelName, fuelType, summary, transcript } = row.aiResult;
-    setData(prev => ({
-      ...prev,
-      customerName: customerName || prev.customerName,
-      modelName: modelName || prev.modelName,
-      fuelType: fuelType || prev.fuelType,
-      remarks: summary || prev.remarks,
-      transcript: transcript || prev.transcript,
-      // Use caName only as fallback when no phone match found
-      salespersonId: prev.salespersonId,
-    }));
-    setExpanded(true);
-  }, [row.aiResult]);
-
   useEffect(() => {
     let mounted = true;
     if (!data.locationId) {
@@ -641,13 +606,7 @@ function IVRRow({
 
   const aiBadge = () => {
     if (!row.callRecordingUrl) return <span className="text-slate-300 text-[10px]">No recording</span>;
-    if (row.aiStatus === AI_STATUS.TRANSCRIBING)
-      return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-600 animate-pulse font-semibold">🎙 Processing…</span>;
-    if (row.aiStatus === AI_STATUS.DONE)
-      return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">✓ AI Filled</span>;
-    if (row.aiStatus === AI_STATUS.FAILED)
-      return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 font-semibold" title={row.aiError}>⚠ Failed</span>;
-    return null;
+    return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold">Recording linked</span>;
   };
 
   return (
@@ -763,7 +722,7 @@ function IVRRow({
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
-                Remarks <span className="font-normal text-slate-400">(AI summary)</span>
+                Remarks <span className="font-normal text-slate-400">(operator note)</span>
                 <input ref={remarksRef} type="text" className="kiosk-input !min-h-[36px] !py-1.5 !text-sm"
                   placeholder="Optional · Enter to save" value={data.remarks}
                   onChange={e => set('remarks', e.target.value)}
@@ -819,30 +778,6 @@ export default function IVREntryScreen() {
       .catch(() => {})
       .finally(() => { if (mounted) setLoadingLocations(false); });
     return () => { mounted = false; };
-  }, []);
-
-  // ── Run AI pipeline for one row ──────────────────────────────────────────────
-  const processRowAI = useCallback((rowId, recordingUrl, hasPhoneMatch, carsSnapshot) => {
-    setRows(prev => prev.map(r => r.id === rowId ? { ...r, aiStatus: AI_STATUS.TRANSCRIBING } : r));
-
-    (async () => {
-      try {
-        // Single edge function call handles Whisper + Claude server-side
-        const result = await callTranscribeEdgeFunction(recordingUrl, carsSnapshot, hasPhoneMatch);
-
-        setRows(prev => prev.map(r => r.id === rowId ? {
-          ...r,
-          aiStatus: AI_STATUS.DONE,
-          aiResult: result,
-        } : r));
-      } catch (err) {
-        setRows(prev => prev.map(r => r.id === rowId ? {
-          ...r,
-          aiStatus: AI_STATUS.FAILED,
-          aiError: err?.message || 'Processing failed',
-        } : r));
-      }
-    })();
   }, []);
 
   // ── File upload handler ──────────────────────────────────────────────────────
@@ -915,9 +850,6 @@ export default function IVREntryScreen() {
           matchedSalespersonId: matchedSalesperson?.id ? String(matchedSalesperson.id) : '',
           matchedLocationId: matchedSalesperson?.location_id ? String(matchedSalesperson.location_id) : '',
           status: STATUS.PENDING,
-          aiStatus: callRecordingUrl ? AI_STATUS.TRANSCRIBING : null,
-          aiResult: null,
-          aiError: null,
           savedSummary: null,
           errorMessage: null,
         };
@@ -930,17 +862,6 @@ export default function IVREntryScreen() {
         const firstId = newRows[0]?.id;
         if (firstId) interestedBtnRefs.current[firstId]?.focus();
       }, 100);
-
-      // Snapshot cars at upload time and kick off AI pipeline for all rows with recordings
-      // Stagger by 1.5s each to avoid hammering the APIs simultaneously
-      const carsSnapshot = cars;
-      newRows
-        .filter(r => r.callRecordingUrl)
-        .forEach((r, i) => {
-          setTimeout(() => {
-            processRowAI(r.id, r.callRecordingUrl, !!r.matchedSalesperson, carsSnapshot);
-          }, i * 1500);
-        });
 
     } catch (err) {
       setFileError(err?.message || 'Failed to parse file.');
@@ -981,7 +902,7 @@ export default function IVREntryScreen() {
     if (!row) return;
     setRowStatus(rowId, STATUS.SAVING);
     try {
-      await createIVRLead({
+      const savedLead = await createIVRLead({
         customer_name: data.customerName.trim() || null,
         mobile_number: row.mobile,
         model_name: data.modelName || null,
@@ -990,8 +911,19 @@ export default function IVREntryScreen() {
         location_id: data.locationId || null,
         remarks: data.remarks.trim() || null,
         transcript: data.transcript || null,
+        conversation_summary: data.conversationSummary?.trim() || null,
         call_datetime: row.callDate ? new Date(row.callDate).toISOString() : null,
+        call_recording_url: row.callRecordingUrl || null,
       });
+
+      if (row.callRecordingUrl && savedLead?.id) {
+        supabase.functions
+          .invoke('transcribe-ivr-call', { body: { leadId: savedLead.id } })
+          .catch((err) => {
+            console.error('Failed to trigger transcribe-ivr-call:', err);
+          });
+      }
+
       const parts = [];
       if (data.customerName.trim()) parts.push(data.customerName.trim());
       if (data.modelName) parts.push(data.modelName);
@@ -1008,11 +940,9 @@ export default function IVREntryScreen() {
       if (r.status === STATUS.SAVED) acc.saved++;
       else if (r.status === STATUS.UNINTERESTED) acc.uninterested++;
       else acc.pending++;
-      if (r.aiStatus === AI_STATUS.DONE) acc.aiDone++;
-      else if (r.aiStatus === AI_STATUS.TRANSCRIBING || r.aiStatus === AI_STATUS.EXTRACTING) acc.aiProcessing++;
       return acc;
     },
-    { saved: 0, uninterested: 0, pending: 0, aiDone: 0, aiProcessing: 0 }
+    { saved: 0, uninterested: 0, pending: 0 }
   );
 
   const matchedCount = rows.filter(r => r.matchedSalesperson).length;
@@ -1021,7 +951,7 @@ export default function IVREntryScreen() {
     <section className="kiosk-card mx-auto w-full rounded-2xl p-6 shadow-lg" style={{ maxWidth: '1200px' }}>
       <h1 className="kiosk-title !mb-1 text-4xl">IVR Lead Entry</h1>
       <p className="mb-5 text-base text-slate-600">
-        Upload your IVR call report ZIP. Calls are transcribed automatically — fields pre-fill as each recording is processed.
+        Upload your IVR call report ZIP. Leads are saved first, then transcription runs in the background.
       </p>
 
       <div className="mb-6 flex gap-1 rounded-2xl bg-slate-100 p-1 w-fit">
@@ -1056,7 +986,7 @@ export default function IVREntryScreen() {
                 {importing ? 'Processing file…' : 'Upload IVR Call Report (ZIP or CSV)'}
               </p>
               <p className="text-sm text-slate-500 mb-4">
-                Click to browse or drag &amp; drop · Calls will be auto-transcribed after upload
+                Click to browse or drag &amp; drop
               </p>
               <div className="inline-flex items-center gap-2 text-xs text-slate-400 bg-white rounded-xl border border-slate-200 px-4 py-2">
                 <span>Required columns:</span>
@@ -1073,7 +1003,7 @@ export default function IVREntryScreen() {
             )}
 
             <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800">
-              Upload the <strong>ZIP file</strong> directly from your IVR portal. Each call recording will be transcribed automatically — fields fill in as processing completes.
+              Upload the <strong>ZIP file</strong> directly from your IVR portal. Transcription status and summaries will appear in All Entries after save.
             </div>
           </div>
         ) : (
@@ -1093,16 +1023,6 @@ export default function IVREntryScreen() {
                 <span className="px-3 py-1.5 rounded-xl bg-orange-50 text-orange-600 font-semibold">Pending: {counts.pending}</span>
                 <span className="px-3 py-1.5 rounded-xl bg-green-50 text-green-700 font-semibold">Saved: {counts.saved}</span>
                 <span className="px-3 py-1.5 rounded-xl bg-red-50 text-red-600 font-semibold">Uninterested: {counts.uninterested}</span>
-                {counts.aiProcessing > 0 && (
-                  <span className="px-3 py-1.5 rounded-xl bg-purple-50 text-purple-700 font-semibold animate-pulse">
-                    🎙 Transcribing: {counts.aiProcessing}
-                  </span>
-                )}
-                {counts.aiDone > 0 && (
-                  <span className="px-3 py-1.5 rounded-xl bg-purple-100 text-purple-700 font-semibold">
-                    ✓ AI Filled: {counts.aiDone}
-                  </span>
-                )}
               </div>
               <button type="button"
                 className="btn border border-slate-300 text-slate-600 bg-white hover:bg-slate-50 text-sm px-4 h-10 rounded-xl"
