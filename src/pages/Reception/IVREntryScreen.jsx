@@ -13,7 +13,8 @@ const AI_LEADS_TABLE = 'ai_leads';
 const EMPLOYEES_TABLE = 'employees';
 const LOCATIONS_TABLE = 'locations';
 
-const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 const STATUS = {
   PENDING: 'pending',
@@ -54,76 +55,34 @@ const FUEL_OPTIONS = [
   { code: 'CNG',    label: 'CNG' },
 ];
 
-// ─── AI Pipeline ──────────────────────────────────────────────────────────────
+// ─── AI Pipeline (via Supabase Edge Function) ─────────────────────────────────
+//
+// All audio fetching and API calls happen server-side in the Edge Function,
+// which avoids the CORS block on the Waybeo S3 bucket.
 
-async function whisperTranscribe(recordingUrl) {
-  if (!OPENAI_API_KEY) throw new Error('VITE_OPENAI_API_KEY not set in .env');
+async function callTranscribeEdgeFunction(recordingUrl, availableCars, hasPhoneMatch) {
+  const carList = availableCars.map(c => c.name).join(', ');
 
-  const audioRes = await fetch(recordingUrl);
-  if (!audioRes.ok) throw new Error(`Could not fetch recording (${audioRes.status})`);
-  const audioBlob = await audioRes.blob();
-  const audioFile = new File([audioBlob], 'recording.mp3', { type: 'audio/mpeg' });
-
-  const formData = new FormData();
-  formData.append('file', audioFile);
-  formData.append('model', 'whisper-1');
-  formData.append('language', 'hi');
-  formData.append('response_format', 'text');
-
-  const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
-    body: formData,
-  });
-
-  if (!res.ok) throw new Error(`Whisper error (${res.status}): ${await res.text()}`);
-  return (await res.text()).trim();
-}
-
-async function claudeExtract(transcript, availableCars, hasPhoneMatch) {
-  const carList = availableCars.map(c => c.name).join(', ') || 'Nexon, Punch, Tiago, Harrier, Safari, Altroz, Curvv';
-  const caLine = hasPhoneMatch
-    ? 'Do NOT extract CA name — already matched from phone.'
-    : 'Extract the CA/advisor name if mentioned.';
-
-  const prompt = `You are a data extraction assistant for a Tata Motors dealership in India.
-Transcript of an IVR sales call (Hindi/English/Hinglish):
-
-Available models: ${carList}
-Fuel types: PETROL, DIESEL, EV, CNG
-
-Extract:
-1. Customer name (look for "mera naam", "I am", direct introduction)
-2. ${caLine}
-3. Car model — match EXACTLY to available models or null
-4. Fuel type — PETROL/DIESEL/EV/CNG or null
-5. SHORT summary — 2-3 sentences in English
-
-Respond ONLY with valid JSON, no markdown:
-{"customerName":"string or null","caName":"string or null","modelName":"exact model or null","fuelType":"PETROL/DIESEL/EV/CNG or null","summary":"2-3 sentence summary"}
-
-Transcript:
-${transcript}`;
-
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 500,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  });
-
-  if (!res.ok) throw new Error(`Claude error (${res.status}): ${await res.text()}`);
+  const res = await fetch(
+    `${SUPABASE_URL}/functions/v1/ivr-transcribe`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({ recordingUrl, carList, hasPhoneMatch }),
+    }
+  );
 
   const data = await res.json();
-  const raw = data.content?.map(b => b.text || '').join('') || '';
-  try {
-    return JSON.parse(raw.replace(/```json|```/g, '').trim());
-  } catch {
-    return { customerName: null, caName: null, modelName: null, fuelType: null, summary: raw.slice(0, 300) };
+
+  if (!res.ok || data.error) {
+    throw new Error(data.error || `Edge function error (${res.status})`);
   }
+
+  // Returns: { transcript, customerName, caName, modelName, fuelType, summary }
+  return data;
 }
 
 // ─── CSV / number helpers ─────────────────────────────────────────────────────
@@ -683,9 +642,7 @@ function IVRRow({
   const aiBadge = () => {
     if (!row.callRecordingUrl) return <span className="text-slate-300 text-[10px]">No recording</span>;
     if (row.aiStatus === AI_STATUS.TRANSCRIBING)
-      return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-600 animate-pulse font-semibold">🎙 Transcribing…</span>;
-    if (row.aiStatus === AI_STATUS.EXTRACTING)
-      return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-600 animate-pulse font-semibold">✨ Extracting…</span>;
+      return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-600 animate-pulse font-semibold">🎙 Processing…</span>;
     if (row.aiStatus === AI_STATUS.DONE)
       return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">✓ AI Filled</span>;
     if (row.aiStatus === AI_STATUS.FAILED)
@@ -866,21 +823,17 @@ export default function IVREntryScreen() {
 
   // ── Run AI pipeline for one row ──────────────────────────────────────────────
   const processRowAI = useCallback((rowId, recordingUrl, hasPhoneMatch, carsSnapshot) => {
-    // Mark as transcribing immediately
     setRows(prev => prev.map(r => r.id === rowId ? { ...r, aiStatus: AI_STATUS.TRANSCRIBING } : r));
 
     (async () => {
       try {
-        const transcript = await whisperTranscribe(recordingUrl);
-
-        setRows(prev => prev.map(r => r.id === rowId ? { ...r, aiStatus: AI_STATUS.EXTRACTING } : r));
-
-        const extracted = await claudeExtract(transcript, carsSnapshot, hasPhoneMatch);
+        // Single edge function call handles Whisper + Claude server-side
+        const result = await callTranscribeEdgeFunction(recordingUrl, carsSnapshot, hasPhoneMatch);
 
         setRows(prev => prev.map(r => r.id === rowId ? {
           ...r,
           aiStatus: AI_STATUS.DONE,
-          aiResult: { transcript, ...extracted },
+          aiResult: result,
         } : r));
       } catch (err) {
         setRows(prev => prev.map(r => r.id === rowId ? {
