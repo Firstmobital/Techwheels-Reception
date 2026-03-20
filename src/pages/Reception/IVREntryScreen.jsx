@@ -586,8 +586,16 @@ function IVRRow({
   row, cars, locations, loadingCars, loadingLocations,
   onMarkUninterested, onSaveInterested, onFocusNext, interestedBtnRef,
 }) {
+  const dbLead = row.dbLead || null;
+  const recordingUrl = dbLead?.call_recording_url || row.callRecordingUrl || null;
   const [data, setData] = useState(() => ({
     ...BLANK_ROW_DATA,
+    customerName: dbLead?.customer_name || '',
+    modelName: dbLead?.model_name || '',
+    fuelType: dbLead?.fuel_type || '',
+    conversationSummary: dbLead?.conversation_summary || '',
+    remarks: dbLead?.remarks || '',
+    transcript: dbLead?.transcript || '',
     salespersonId: row.matchedSalespersonId || '',
     locationId: row.matchedLocationId || '',
   }));
@@ -597,6 +605,8 @@ function IVRRow({
   const [loadingSP, setLoadingSP] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [showTranscript, setShowTranscript] = useState(false);
+  const [showAudio, setShowAudio] = useState(false);
+  const [audioError, setAudioError] = useState(false);
 
   const customerNameRef = useRef(null);
   const modelRef = useRef(null);
@@ -647,9 +657,29 @@ function IVRRow({
     if (e.key === 'Enter') { e.preventDefault(); handleSave(); }
   }, [handleSave]);
 
+  const openExpandedEditor = () => {
+    setData(prev => ({
+      ...prev,
+      customerName: dbLead?.customer_name || prev.customerName,
+      modelName: dbLead?.model_name || prev.modelName,
+      fuelType: dbLead?.fuel_type || prev.fuelType,
+      conversationSummary: dbLead?.conversation_summary || prev.conversationSummary,
+      remarks: dbLead?.remarks || prev.remarks,
+      transcript: dbLead?.transcript || prev.transcript,
+    }));
+    setExpanded(true);
+    setTimeout(() => customerNameRef.current?.focus(), 50);
+  };
+
   const aiBadge = () => {
-    if (!row.callRecordingUrl) return <span className="text-slate-300 text-[10px]">No recording</span>;
-    return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold">Recording linked</span>;
+    if (!recordingUrl) return <span className="text-slate-300 text-[10px]">No recording</span>;
+    const { label, color } = normalizeTranscriptionStatus(dbLead || {});
+    return (
+      <div className="flex flex-col gap-1">
+        <span className={`w-fit text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${color}`}>{label}</span>
+        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold">Recording linked</span>
+      </div>
+    );
   };
 
   return (
@@ -674,11 +704,92 @@ function IVRRow({
           {row.status === STATUS.SAVING && <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-600 animate-pulse">Saving…</span>}
         </td>
         <td className="px-3 py-2 text-xs text-slate-500">
-          {row.status === STATUS.SAVED && row.savedSummary
-            ? <span>{row.savedSummary}</span>
-            : row.status === STATUS.ERROR
-            ? <span className="text-yellow-700">{row.errorMessage}</span>
-            : null}
+          <div className="flex flex-col gap-0.5 max-w-[320px]">
+            <span className="truncate" title={dbLead?.customer_name || ''}>
+              <span className="text-slate-400">Name: </span>
+              {dbLead?.customer_name || <span className="text-slate-300">-</span>}
+            </span>
+            <span className="truncate" title={dbLead?.model_name || ''}>
+              <span className="text-slate-400">Model: </span>
+              {dbLead?.model_name || <span className="text-slate-300">-</span>}
+            </span>
+            <span className="truncate" title={dbLead?.fuel_type || ''}>
+              <span className="text-slate-400">Fuel: </span>
+              {dbLead?.fuel_type || <span className="text-slate-300">-</span>}
+            </span>
+            <span className="truncate" title={dbLead?.remarks || ''}>
+              <span className="text-slate-400">Remarks: </span>
+              {dbLead?.remarks || <span className="text-slate-300">(operator note empty)</span>}
+            </span>
+            <div className="text-[11px] leading-snug" title={dbLead?.conversation_summary || ''}>
+              <span className="text-slate-400">Summary: </span>
+              {dbLead?.conversation_summary ? (
+                <span
+                  className="text-slate-600"
+                  style={{
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {dbLead.conversation_summary}
+                </span>
+              ) : (
+                <span className="text-slate-300">-</span>
+              )}
+            </div>
+            {dbLead?.transcript && (
+              <button
+                type="button"
+                onClick={() => setShowTranscript(true)}
+                className="w-fit text-blue-500 underline hover:text-blue-700"
+              >
+                View Transcript
+              </button>
+            )}
+            {recordingUrl && (
+              <div className="flex flex-col gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAudio(prev => !prev);
+                    setAudioError(false);
+                  }}
+                  className="w-fit text-blue-500 underline hover:text-blue-700"
+                >
+                  {showAudio ? 'Hide Recording' : 'Play Recording'}
+                </button>
+                {showAudio && (
+                  <>
+                    <audio
+                      controls
+                      preload="none"
+                      src={recordingUrl}
+                      className="h-8 w-full max-w-[220px]"
+                      onError={() => setAudioError(true)}
+                    />
+                    {audioError && (
+                      <span className="text-[10px] text-amber-700">Playback blocked. Open raw link instead.</span>
+                    )}
+                    <a
+                      href={recordingUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="w-fit text-blue-500 underline hover:text-blue-700"
+                    >
+                      Open raw link
+                    </a>
+                  </>
+                )}
+              </div>
+            )}
+            {row.status === STATUS.SAVED && row.savedSummary
+              ? <span className="text-emerald-700">{row.savedSummary}</span>
+              : row.status === STATUS.ERROR
+              ? <span className="text-yellow-700">{row.errorMessage}</span>
+              : null}
+          </div>
         </td>
         <td className="px-3 py-2 text-right whitespace-nowrap">
           {!isDone && (
@@ -686,7 +797,7 @@ function IVRRow({
               {!expanded ? (
                 <button ref={interestedBtnRef} type="button"
                   className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
-                  onClick={() => { setExpanded(true); setTimeout(() => customerNameRef.current?.focus(), 50); }}
+                  onClick={openExpandedEditor}
                   disabled={isSaving} title="U = Uninterested">
                   Interested
                 </button>
@@ -772,7 +883,7 @@ function IVRRow({
                   onKeyDown={handleRemarksKeyDown} />
               </label>
             </div>
-            {data.transcript && (
+            {dbLead?.transcript && (
               <div className="mt-2.5 flex items-center gap-2 text-xs">
                 <span className="text-purple-600 font-semibold">📄 Transcript ready</span>
                 <button type="button" onClick={() => setShowTranscript(true)}
@@ -782,7 +893,7 @@ function IVRRow({
           </td>
         </tr>
       )}
-      {showTranscript && <TranscriptModal transcript={data.transcript} onClose={() => setShowTranscript(false)} />}
+      {showTranscript && <TranscriptModal transcript={dbLead?.transcript} onClose={() => setShowTranscript(false)} />}
     </tbody>
   );
 }
@@ -840,7 +951,7 @@ export default function IVREntryScreen() {
     const { data, error } = await supabase
       .from(IVR_LEADS_TABLE)
       .insert(leadsToInsert)
-      .select('id, call_recording_url');
+      .select('id, call_recording_url, customer_name, model_name, fuel_type, conversation_summary, remarks, transcript, transcription_status');
 
     if (error) throw error;
     return data || [];
@@ -935,6 +1046,17 @@ export default function IVREntryScreen() {
           callDate: parsed.callDate,
           connectedToRaw: parsed.connectedToRaw,
           callRecordingUrl: lead.call_recording_url || null,
+          dbLead: {
+            id: lead.id,
+            call_recording_url: lead.call_recording_url || null,
+            customer_name: lead.customer_name || null,
+            model_name: lead.model_name || null,
+            fuel_type: lead.fuel_type || null,
+            conversation_summary: lead.conversation_summary || null,
+            remarks: lead.remarks || null,
+            transcript: lead.transcript || null,
+            transcription_status: lead.transcription_status || null,
+          },
           matchedSalesperson: matched,
           matchedSalespersonId: matched?.id ? String(matched.id) : '',
           matchedLocationId: matched?.location_id ? String(matched.location_id) : '',
@@ -977,6 +1099,45 @@ export default function IVREntryScreen() {
     setFileError('');
     interestedBtnRefs.current = {};
   };
+
+  useEffect(() => {
+    if (activeTab !== 'entry' || !hasImported || rows.length === 0) return;
+    const leadIds = rows.map(r => r.ivrLeadsId).filter(Boolean);
+    if (!leadIds.length) return;
+
+    let mounted = true;
+    const syncRowsFromDB = async () => {
+      const { data, error } = await supabase
+        .from(IVR_LEADS_TABLE)
+        .select('id, call_recording_url, customer_name, model_name, fuel_type, conversation_summary, remarks, transcript, transcription_status')
+        .in('id', leadIds);
+
+      if (error) {
+        console.error('Failed to sync IVR rows:', error);
+        return;
+      }
+      if (!mounted) return;
+
+      const byId = new Map((data || []).map(item => [item.id, item]));
+      setRows(prev => prev.map(r => {
+        if (!r.ivrLeadsId) return r;
+        const dbLead = byId.get(r.ivrLeadsId);
+        if (!dbLead) return r;
+        return {
+          ...r,
+          dbLead,
+          callRecordingUrl: r.callRecordingUrl || dbLead.call_recording_url || null,
+        };
+      }));
+    };
+
+    syncRowsFromDB();
+    const timer = setInterval(syncRowsFromDB, 8000);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, [activeTab, hasImported, rows.length]);
 
   // ── Row actions ──────────────────────────────────────────────────────────────
 
@@ -1068,14 +1229,14 @@ export default function IVREntryScreen() {
 
       // Promote to ai_leads
       const promotionPayload = {
-        customer_name: data.customerName?.trim() || null,
+        customer_name: data.customerName?.trim() || row.dbLead?.customer_name || null,
         mobile_number: row.mobile,
-        model_name: data.modelName || null,
-        fuel_type: data.fuelType || null,
+        model_name: data.modelName || row.dbLead?.model_name || null,
+        fuel_type: data.fuelType || row.dbLead?.fuel_type || null,
         salesperson_id: data.salespersonId || null,
         location_id: data.locationId || null,
-        remarks: data.remarks?.trim() || null,
-        conversation_summary: data.conversationSummary?.trim() || null,
+        remarks: data.remarks?.trim() || row.dbLead?.remarks || null,
+        conversation_summary: data.conversationSummary?.trim() || row.dbLead?.conversation_summary || null,
         call_datetime: row.callDate ? new Date(row.callDate).toISOString() : null,
       };
 

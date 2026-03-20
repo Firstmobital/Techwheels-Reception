@@ -2,9 +2,9 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
-const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || Deno.env.get('PROJECT_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+const OPENAI_EXTRACTION_MODEL = 'gpt-4.1-mini';
 
 const IVR_LEADS_TABLE = 'ivr_leads';
 const CAR_TABLE = 'car';
@@ -89,6 +89,31 @@ function normalizeModelName(extractedModel: string | null, carsFromDb: string[])
   const target = normalizeText(extractedModel);
   if (!target) return null;
 
+  const raw = String(extractedModel || '').toLowerCase();
+
+  const canonicalHints: Array<{ canonical: string; hints: string[] }> = [
+    { canonical: 'Nexon', hints: ['nexon', 'नेक्सन', 'नेऊन', 'नेक्सनशार'] },
+    { canonical: 'Harrier', hints: ['harrier', 'haryar', 'हेरियर', 'हरियर'] },
+    { canonical: 'Punch', hints: ['punch', 'पंच'] },
+    { canonical: 'Altroz', hints: ['altroz', 'altro', 'अल्ट्रोज', 'अल्ट्रो', 'अल्ट्रो स्ट्रियर'] },
+    { canonical: 'Safari', hints: ['safari', 'सफारी'] },
+    { canonical: 'Tiago', hints: ['tiago', 'टियागो'] },
+    { canonical: 'Curvv', hints: ['curvv', 'curv', 'कर्व', 'कर्व्व'] },
+  ];
+
+  const hintedCanonical = canonicalHints.find((entry) => entry.hints.some((hint) => raw.includes(hint.toLowerCase())))?.canonical;
+
+  if (hintedCanonical) {
+    const hintedTarget = normalizeText(hintedCanonical);
+    for (const model of carsFromDb) {
+      const normalizedModel = normalizeText(model);
+      if (!normalizedModel) continue;
+      if (normalizedModel === hintedTarget || normalizedModel.includes(hintedTarget) || hintedTarget.includes(normalizedModel)) {
+        return model;
+      }
+    }
+  }
+
   let bestExactOrContain: string | null = null;
   let bestFuzzy: { model: string; score: number } | null = null;
 
@@ -116,17 +141,36 @@ function normalizeFuelType(extractedFuel: string | null, allowedFuelCodes: strin
   const value = normalizeText(extractedFuel);
   if (!value) return null;
 
+  const raw = String(extractedFuel || '').toLowerCase();
+
   const canonical = new Set(['PETROL', 'DIESEL', 'EV', 'CNG']);
   const allowed = new Set((allowedFuelCodes || []).map((c) => String(c || '').toUpperCase()).filter((c) => canonical.has(c)));
   const accepted = allowed.size ? allowed : canonical;
 
+  const hindiHints: Array<{ hints: string[]; out: 'PETROL' | 'DIESEL' | 'EV' | 'CNG' }> = [
+    { hints: ['पेट्रोल', 'पट्रोल', 'पैटरोल'], out: 'PETROL' },
+    { hints: ['डीजल', 'डीज़ल', 'डईजल'], out: 'DIESEL' },
+    { hints: ['सीएनजी', 'सी एंजी'], out: 'CNG' },
+    { hints: ['ईवी', 'इलेक्ट्रिक'], out: 'EV' },
+  ];
+
+  for (const group of hindiHints) {
+    if (group.hints.some((hint) => raw.includes(hint.toLowerCase())) && accepted.has(group.out)) {
+      return group.out;
+    }
+  }
+
   const candidates: Array<{ key: string; out: 'PETROL' | 'DIESEL' | 'EV' | 'CNG' }> = [
     { key: 'diesel', out: 'DIESEL' },
     { key: 'petrol', out: 'PETROL' },
+    { key: 'patrol', out: 'PETROL' },
+    { key: 'petarol', out: 'PETROL' },
     { key: 'gasoline', out: 'PETROL' },
     { key: 'electric', out: 'EV' },
     { key: 'ev', out: 'EV' },
+    { key: 'e v', out: 'EV' },
     { key: 'cng', out: 'CNG' },
+    { key: 'c ng', out: 'CNG' },
   ];
 
   for (const c of candidates) {
@@ -211,7 +255,7 @@ async function transcribeAudio(recordingUrl: string): Promise<string> {
 }
 
 async function extractFromTranscript(transcript: string, availableModels: string[]): Promise<ExtractedPayload> {
-  if (!ANTHROPIC_API_KEY) {
+  if (!OPENAI_API_KEY) {
     return {
       customer_name: null,
       model_name_raw: null,
@@ -251,57 +295,79 @@ Rules:
 - fuel_type_raw must preserve what was heard (no normalization).
 - ca_name_raw must preserve what was heard (no normalization).
 - summary should be short and operationally useful (1-2 sentences).
-- operator_note should be concise and suitable for CRM notes (ai_leads.remarks).
+- operator_note should be concise and suitable for CRM notes (ivr_leads.remarks).
 - transcript_quality must be one of: "good", "partial", "poor"; otherwise null.
 
 Transcript:
 ${transcript}`;
 
-  const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+  const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 500,
-      messages: [{ role: 'user', content: prompt }],
+      model: OPENAI_EXTRACTION_MODEL,
+      temperature: 0,
+      messages: [
+        {
+          role: 'system',
+          content: 'Extract structured fields from dealership IVR transcript. Return JSON only. Never invent values. Use null when unknown.',
+        },
+        { role: 'user', content: prompt },
+      ],
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'ivr_extraction',
+          strict: true,
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              customer_name: { type: ['string', 'null'] },
+              model_name_raw: { type: ['string', 'null'] },
+              fuel_type_raw: { type: ['string', 'null'] },
+              ca_name_raw: { type: ['string', 'null'] },
+              summary: { type: ['string', 'null'] },
+              operator_note: { type: ['string', 'null'] },
+              transcript_quality: { type: ['string', 'null'] },
+            },
+            required: [
+              'customer_name',
+              'model_name_raw',
+              'fuel_type_raw',
+              'ca_name_raw',
+              'summary',
+              'operator_note',
+              'transcript_quality',
+            ],
+          },
+        },
+      },
     }),
   });
 
-  if (!claudeRes.ok) {
-    throw new Error(`Claude error (${claudeRes.status}): ${await claudeRes.text()}`);
+  if (!openaiRes.ok) {
+    throw new Error(`OpenAI extraction error (${openaiRes.status}): ${await openaiRes.text()}`);
   }
 
-  const claudeData = await claudeRes.json();
-  const raw = claudeData.content?.map((b: { text?: string }) => b.text || '').join('') || '';
+  const openaiData = await openaiRes.json();
+  const raw = openaiData?.choices?.[0]?.message?.content || '';
+  const parsed = JSON.parse(String(raw).trim());
 
-  try {
-    const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
-    return {
-      customer_name: parsed.customer_name || null,
-      ca_name_raw: parsed.ca_name_raw || null,
-      model_name_raw: parsed.model_name_raw || null,
-      fuel_type_raw: parsed.fuel_type_raw || null,
-      summary: parsed.summary || null,
-      operator_note: parsed.operator_note || null,
-      transcript_quality: ['good', 'partial', 'poor'].includes(String(parsed.transcript_quality || '').toLowerCase())
-        ? String(parsed.transcript_quality).toLowerCase()
-        : null,
-    };
-  } catch {
-    return {
-      customer_name: null,
-      ca_name_raw: null,
-      model_name_raw: null,
-      fuel_type_raw: null,
-      summary: raw.slice(0, 300) || null,
-      operator_note: null,
-      transcript_quality: null,
-    };
-  }
+  return {
+    customer_name: parsed.customer_name || null,
+    ca_name_raw: parsed.ca_name_raw || null,
+    model_name_raw: parsed.model_name_raw || null,
+    fuel_type_raw: parsed.fuel_type_raw || null,
+    summary: parsed.summary || null,
+    operator_note: parsed.operator_note || null,
+    transcript_quality: ['good', 'partial', 'poor'].includes(String(parsed.transcript_quality || '').toLowerCase())
+      ? String(parsed.transcript_quality).toLowerCase()
+      : null,
+  };
 }
 
 serve(async (req: Request) => {
@@ -368,7 +434,7 @@ serve(async (req: Request) => {
 
     const { data: cars, error: carsError } = await supabase
       .from(CAR_TABLE)
-      .select('name, model_name')
+      .select('name')
       .eq('is_published', true);
 
     if (carsError) {
@@ -384,8 +450,7 @@ serve(async (req: Request) => {
     }
 
     const carNames = (cars || [])
-      .flatMap((row: { name?: string | null; model_name?: string | null }) => [row.name, row.model_name])
-      .map((name: string | null | undefined) => String(name || '').trim())
+      .map((row: { name?: string | null }) => String(row.name || '').trim())
       .filter(Boolean);
 
     const fuelCodes = (fuelTypes || [])
@@ -393,7 +458,23 @@ serve(async (req: Request) => {
       .filter(Boolean);
 
     const transcript = await transcribeAudio(lead.call_recording_url);
-    const extracted = await extractFromTranscript(transcript, carNames);
+
+    let extracted: ExtractedPayload = {
+      customer_name: null,
+      model_name_raw: null,
+      fuel_type_raw: null,
+      ca_name_raw: null,
+      summary: null,
+      operator_note: null,
+      transcript_quality: null,
+    };
+    let extractionError: string | null = null;
+
+    try {
+      extracted = await extractFromTranscript(transcript, carNames);
+    } catch (extractionErr) {
+      extractionError = extractionErr instanceof Error ? extractionErr.message : 'Transcript extraction failed';
+    }
 
     const normalizedModel = normalizeModelName(extracted.model_name_raw, carNames);
     const normalizedFuel = normalizeFuelType(extracted.fuel_type_raw, fuelCodes);
@@ -418,7 +499,7 @@ serve(async (req: Request) => {
 
     const updatePayload: Record<string, unknown> = {
       transcription_status: 'completed',
-      transcription_error: null,
+      transcription_error: extractionError ? `extraction_failed_manual_review: ${extractionError}` : null,
       transcribed_at: new Date().toISOString(),
       ca_name_raw: extracted.ca_name_raw || null,
       model_name_raw: extracted.model_name_raw || null,
@@ -463,7 +544,19 @@ serve(async (req: Request) => {
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
+    const message = (
+      err instanceof Error
+        ? err.message
+        : (err && typeof err === 'object' && 'message' in err && typeof (err as { message?: unknown }).message === 'string')
+          ? String((err as { message: string }).message)
+          : (() => {
+              try {
+                return JSON.stringify(err);
+              } catch {
+                return 'Unknown error';
+              }
+            })()
+    ) || 'Unknown error';
 
     if (leadId !== null && leadId !== undefined && String(leadId).trim() !== '' && SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
       try {
