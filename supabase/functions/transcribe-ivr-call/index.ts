@@ -6,7 +6,7 @@ const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY');
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || Deno.env.get('PROJECT_URL');
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
-const AI_LEADS_TABLE = 'ai_leads';
+const IVR_LEADS_TABLE = 'ivr_leads';
 const CAR_TABLE = 'car';
 const FUEL_TYPE_TABLE = 'fuel_type';
 const EMPLOYEES_TABLE = 'employees';
@@ -341,7 +341,7 @@ serve(async (req: Request) => {
     }
 
     const { data: lead, error: leadError } = await supabase
-      .from(AI_LEADS_TABLE)
+      .from(IVR_LEADS_TABLE)
       .select('id, customer_name, model_name, fuel_type, salesperson_id, remarks, conversation_summary, transcript, call_recording_url, transcription_status')
       .eq('id', leadId)
       .single();
@@ -355,7 +355,7 @@ serve(async (req: Request) => {
     }
 
     const { error: statusError } = await supabase
-      .from(AI_LEADS_TABLE)
+      .from(IVR_LEADS_TABLE)
       .update({
         transcription_status: 'processing',
         transcription_error: null,
@@ -448,7 +448,7 @@ serve(async (req: Request) => {
     if (remarksForWrite !== undefined) updatePayload.remarks = remarksForWrite;
 
     const { data: updatedLead, error: updateError } = await supabase
-      .from(AI_LEADS_TABLE)
+      .from(IVR_LEADS_TABLE)
       .update(updatePayload)
       .eq('id', lead.id)
       .select('*')
@@ -472,7 +472,7 @@ serve(async (req: Request) => {
         });
 
         await supabase
-          .from(AI_LEADS_TABLE)
+          .from(IVR_LEADS_TABLE)
           .update({
             transcription_status: 'failed',
             transcription_error: message,

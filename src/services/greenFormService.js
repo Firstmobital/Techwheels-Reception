@@ -69,9 +69,10 @@ export async function submitOptyId(source_type, id, opty_id) {
     throw new Error('Invalid source_type. Expected walkin, ivr or ai.');
   }
 
-  // IVR leads are now stored in ai_leads (lead_source = 'IVR').
-  // The greenform_pending_leads view returns source_type = 'ivr' for them,
-  // but the underlying table is always ai_leads for both 'ivr' and 'ai' source types.
+  // Route to appropriate table:
+  // - walkin: showroom_walkins
+  // - ivr: ai_leads (promoted interested rows from ivr_leads)
+  // - ai: ai_leads (direct AI/chatbot leads)
   const tableName = normalizedSourceType === 'walkin'
     ? WALKINS_TABLE
     : 'ai_leads';
@@ -111,14 +112,16 @@ export async function getTodayGreenFormStats() {
       .gte('opty_submitted_at', startIso)
       .lt('opty_submitted_at', endIso),
     supabase
-      .from(IVR_LEADS_TABLE)
+      .from('ai_leads')
       .select('id', { count: 'exact', head: true })
+      .eq('lead_source', 'IVR')
       .eq('opty_status', 'submitted')
       .gte('opty_submitted_at', startIso)
       .lt('opty_submitted_at', endIso),
     supabase
       .from('ai_leads')
       .select('id', { count: 'exact', head: true })
+      .not('lead_source', 'eq', 'IVR')
       .eq('opty_status', 'submitted')
       .gte('opty_submitted_at', startIso)
       .lt('opty_submitted_at', endIso)

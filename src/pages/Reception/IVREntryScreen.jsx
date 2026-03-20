@@ -9,7 +9,7 @@ import { supabase } from '../../services/supabaseClient';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const AI_LEADS_TABLE = 'ai_leads';
+const IVR_LEADS_TABLE = 'ivr_leads';
 const EMPLOYEES_TABLE = 'employees';
 const LOCATIONS_TABLE = 'locations';
 
@@ -188,9 +188,8 @@ function TranscriptModal({ transcript, onClose }) {
 
 async function fetchIVREntries(dateFilter) {
   let query = supabase
-    .from(AI_LEADS_TABLE)
-    .select('id, customer_name, mobile_number, model_name, fuel_type, salesperson_id, location_id, remarks, conversation_summary, transcript, transcription_status, transcription_error, lead_source, opty_status, lead_disposition, call_datetime, created_at, updated_at')
-    .eq('lead_source', 'IVR')
+    .from(IVR_LEADS_TABLE)
+    .select('id, customer_name, mobile_number, model_name, fuel_type, salesperson_id, location_id, remarks, conversation_summary, transcript, transcription_status, transcription_error, review_status, call_datetime, created_at, updated_at')
     .order('created_at', { ascending: false })
     .range(0, 9999);
 
@@ -230,11 +229,55 @@ async function fetchIVREntries(dateFilter) {
 
 async function updateIVREntry(id, payload) {
   const { data, error } = await supabase
-    .from(AI_LEADS_TABLE)
+    .from(IVR_LEADS_TABLE)
     .update({ ...payload, updated_at: new Date().toISOString() })
     .eq('id', id).select().single();
   if (error) throw error;
   return data;
+}
+
+async function promoteIVRLeadToAI(ivrLeadId, payload) {
+  // Create final AI lead from reviewed ivr_leads data
+  const aiLeadPayload = {
+    customer_name: payload.customer_name,
+    mobile_number: payload.mobile_number,
+    model_name: payload.model_name,
+    fuel_type: payload.fuel_type,
+    salesperson_id: payload.salesperson_id || null,
+    location_id: payload.location_id || null,
+    remarks: payload.remarks,
+    conversation_summary: payload.conversation_summary,
+    call_datetime: payload.call_datetime,
+    lead_source: 'IVR',
+    lead_disposition: 'active',
+    opty_status: 'pending',
+    greenform_requested: false,
+    assigned_at: payload.salesperson_id ? new Date().toISOString() : null,
+  };
+
+  const { data: aiLead, error: aiError } = await supabase
+    .from('ai_leads')
+    .insert(aiLeadPayload)
+    .select('id')
+    .single();
+
+  if (aiError) throw aiError;
+
+  // Link back: update ivr_leads with review_status, reviewed_at, and final_ai_lead_id
+  const { data: updated, error: updateError } = await supabase
+    .from(IVR_LEADS_TABLE)
+    .update({
+      review_status: 'interested',
+      reviewed_at: new Date().toISOString(),
+      final_ai_lead_id: aiLead.id,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', ivrLeadId)
+    .select()
+    .single();
+
+  if (updateError) throw updateError;
+  return { aiLead, updatedIVRLead: updated };
 }
 
 // ─── Employee lookup by mobile ────────────────────────────────────────────────
@@ -781,6 +824,28 @@ export default function IVREntryScreen() {
   }, []);
 
   // ── File upload handler ──────────────────────────────────────────────────────
+
+  async function batchInsertIVRLeads(parseRowsWithMatches) {
+    // Insert all parsed rows into ivr_leads for review/transcription
+    const leadsToInsert = parseRowsWithMatches.map(({ mobile, callDate, connectedToRaw, matchedSalesperson, callRecordingUrl }) => ({
+      mobile_number: mobile,
+      call_datetime: callDate ? new Date(callDate).toISOString() : null,
+      connected_to_raw: connectedToRaw,
+      salesperson_id: matchedSalesperson?.id || null,
+      location_id: matchedSalesperson?.location_id || null,
+      call_recording_url: callRecordingUrl || null,
+      review_status: 'pending',
+    }));
+
+    const { data, error } = await supabase
+      .from(IVR_LEADS_TABLE)
+      .insert(leadsToInsert)
+      .select('id, call_recording_url');
+
+    if (error) throw error;
+    return data || [];
+  }
+
   const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -836,19 +901,43 @@ export default function IVREntryScreen() {
       const connectedPhones = parsed.map(r => r.connectedToRaw).filter(Boolean);
       const empByMobile = await fetchEmployeesByMobile(connectedPhones);
 
-      const newRows = parsed.map(({ mobile, callDate, connectedToRaw, callRecordingUrl }, index) => {
+      const parseRowsWithMatches = parsed.map(({ mobile, callDate, connectedToRaw, callRecordingUrl }) => {
         const connectedNormalized = normalizePhone(connectedToRaw);
         const matchedSalesperson = connectedNormalized ? empByMobile.get(connectedNormalized) || null : null;
         return {
-          id: `${mobile}-${index}`,
-          index,
           mobile,
           callDate,
           connectedToRaw,
           callRecordingUrl: callRecordingUrl || null,
           matchedSalesperson,
-          matchedSalespersonId: matchedSalesperson?.id ? String(matchedSalesperson.id) : '',
-          matchedLocationId: matchedSalesperson?.location_id ? String(matchedSalesperson.location_id) : '',
+        };
+      });
+
+      // Insert all rows to ivr_leads immediately for review/transcription
+      const insertedLeads = await batchInsertIVRLeads(parseRowsWithMatches);
+
+      if (insertedLeads.length === 0) {
+        setFileError('Failed to insert leads. Please try again.');
+        setImporting(false);
+        e.target.value = '';
+        return;
+      }
+
+      // Create UI rows with actual ivr_leads IDs for promotion workflow
+      const newRows = insertedLeads.map((lead, index) => {
+        const parsed = parseRowsWithMatches[index];
+        const matched = parsed.matchedSalesperson;
+        return {
+          id: String(lead.id), // Use actual ivr_leads.id for database operations
+          ivrLeadsId: lead.id,
+          index,
+          mobile: parsed.mobile,
+          callDate: parsed.callDate,
+          connectedToRaw: parsed.connectedToRaw,
+          callRecordingUrl: lead.call_recording_url || null,
+          matchedSalesperson: matched,
+          matchedSalespersonId: matched?.id ? String(matched.id) : '',
+          matchedLocationId: matched?.location_id ? String(matched.location_id) : '',
           status: STATUS.PENDING,
           savedSummary: null,
           errorMessage: null,
@@ -863,8 +952,19 @@ export default function IVREntryScreen() {
         if (firstId) interestedBtnRefs.current[firstId]?.focus();
       }, 100);
 
+      // Trigger transcription asynchronously for leads with recordings
+      insertedLeads.forEach(lead => {
+        if (lead.call_recording_url && lead.id) {
+          supabase.functions
+            .invoke('transcribe-ivr-call', { body: { leadId: lead.id } })
+            .catch((err) => {
+              console.error(`Failed to trigger transcription for lead ${lead.id}:`, err);
+            });
+        }
+      });
+
     } catch (err) {
-      setFileError(err?.message || 'Failed to parse file.');
+      setFileError(err?.message || 'Failed to process file.');
     } finally {
       setImporting(false);
       e.target.value = '';
@@ -893,43 +993,100 @@ export default function IVREntryScreen() {
     });
   }, []);
 
-  const handleMarkUninterested = useCallback((rowId) => {
+  const handleMarkUninterested = useCallback(async (rowId) => {
+    const row = rows.find(r => r.id === rowId);
+    if (!row) return;
+    
     setRowStatus(rowId, STATUS.UNINTERESTED);
-  }, [setRowStatus]);
+
+    // If row exists in ivr_leads, mark it as uninterested
+    if (row.ivrLeadsId) {
+      try {
+        await supabase
+          .from(IVR_LEADS_TABLE)
+          .update({
+            review_status: 'uninterested',
+            reviewed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', row.ivrLeadsId);
+      } catch (err) {
+        console.error(`Failed to mark lead ${row.ivrLeadsId} as uninterested:`, err);
+      }
+    }
+  }, [rows, setRowStatus]);
 
   const handleSaveInterested = useCallback(async (rowId, data) => {
     const row = rows.find(r => r.id === rowId);
     if (!row) return;
     setRowStatus(rowId, STATUS.SAVING);
     try {
-      const savedLead = await createIVRLead({
-        customer_name: data.customerName.trim() || null,
+      let ivrLeadId = row.ivrLeadsId;
+      let ivrLead = null;
+
+      // If row doesn't have an ivr_leads ID, create the review record first (manual entry case)
+      if (!ivrLeadId) {
+        const savedLead = await createIVRLead({
+          customer_name: data.customerName.trim() || null,
+          mobile_number: row.mobile,
+          model_name: data.modelName || null,
+          fuel_type: data.fuelType || null,
+          salesperson_id: data.salespersonId || null,
+          location_id: data.locationId || null,
+          remarks: data.remarks.trim() || null,
+          transcript: data.transcript || null,
+          conversation_summary: data.conversationSummary?.trim() || null,
+          call_datetime: row.callDate ? new Date(row.callDate).toISOString() : null,
+          call_recording_url: row.callRecordingUrl || null,
+        });
+
+        if (row.callRecordingUrl && savedLead?.id) {
+          supabase.functions
+            .invoke('transcribe-ivr-call', { body: { leadId: savedLead.id } })
+            .catch((err) => {
+              console.error('Failed to trigger transcribe-ivr-call:', err);
+            });
+        }
+
+        ivrLeadId = savedLead.id;
+        ivrLead = savedLead;
+      } else {
+        // Row already exists in ivr_leads (from file upload)
+        // Fetch to check if already promoted
+        const { data: existing } = await supabase
+          .from(IVR_LEADS_TABLE)
+          .select('final_ai_lead_id')
+          .eq('id', ivrLeadId)
+          .single();
+
+        if (existing?.final_ai_lead_id) {
+          // Already promoted, skip
+          setRowStatus(rowId, STATUS.SAVED, { savedSummary: 'Already promoted to AI' });
+          return;
+        }
+      }
+
+      // Promote to ai_leads
+      const promotionPayload = {
+        customer_name: data.customerName?.trim() || null,
         mobile_number: row.mobile,
         model_name: data.modelName || null,
         fuel_type: data.fuelType || null,
         salesperson_id: data.salespersonId || null,
         location_id: data.locationId || null,
-        remarks: data.remarks.trim() || null,
-        transcript: data.transcript || null,
+        remarks: data.remarks?.trim() || null,
         conversation_summary: data.conversationSummary?.trim() || null,
         call_datetime: row.callDate ? new Date(row.callDate).toISOString() : null,
-        call_recording_url: row.callRecordingUrl || null,
-      });
+      };
 
-      if (row.callRecordingUrl && savedLead?.id) {
-        supabase.functions
-          .invoke('transcribe-ivr-call', { body: { leadId: savedLead.id } })
-          .catch((err) => {
-            console.error('Failed to trigger transcribe-ivr-call:', err);
-          });
-      }
+      await promoteIVRLeadToAI(ivrLeadId, promotionPayload);
 
       const parts = [];
-      if (data.customerName.trim()) parts.push(data.customerName.trim());
+      if (data.customerName?.trim()) parts.push(data.customerName.trim());
       if (data.modelName) parts.push(data.modelName);
       if (data.fuelType) parts.push(FUEL_OPTIONS.find(f => f.code === data.fuelType)?.label || data.fuelType);
-      if (data.remarks.trim()) parts.push(`"${data.remarks.trim()}"`);
-      setRowStatus(rowId, STATUS.SAVED, { savedSummary: parts.join(' · ') || 'Saved to AI queue' });
+      if (data.remarks?.trim()) parts.push(`"${data.remarks.trim()}"`);
+      setRowStatus(rowId, STATUS.SAVED, { savedSummary: parts.join(' · ') || 'Promoted to AI' });
     } catch (error) {
       setRowStatus(rowId, STATUS.ERROR, { errorMessage: error?.message || 'Save failed.' });
     }
@@ -1003,7 +1160,7 @@ export default function IVREntryScreen() {
             )}
 
             <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800">
-              Upload the <strong>ZIP file</strong> directly from your IVR portal. Transcription status and summaries will appear in All Entries after save.
+              Upload the <strong>ZIP file</strong> directly from your IVR portal. Leads will be saved and transcription will start automatically.
             </div>
           </div>
         ) : (
