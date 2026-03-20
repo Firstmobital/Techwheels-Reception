@@ -5,16 +5,6 @@ import {
   getLocations,
   getSalesPersonsByLocation
 } from '../../services/walkinService';
-
-// Fetch fuel types from the fuel_type lookup table
-async function getFuelTypes(supabaseClient) {
-  const { data, error } = await supabaseClient
-    .from('fuel_type')
-    .select('id, code, label')
-    .order('id', { ascending: true });
-  if (error) throw error;
-  return data || [];
-}
 import { supabase } from '../../services/supabaseClient';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -23,12 +13,21 @@ const AI_LEADS_TABLE = 'ai_leads';
 const EMPLOYEES_TABLE = 'employees';
 const LOCATIONS_TABLE = 'locations';
 
+const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY;
+
 const STATUS = {
   PENDING: 'pending',
   SAVING: 'saving',
   SAVED: 'saved',
   UNINTERESTED: 'uninterested',
   ERROR: 'error',
+};
+
+const AI_STATUS = {
+  TRANSCRIBING: 'transcribing',
+  EXTRACTING: 'extracting',
+  DONE: 'done',
+  FAILED: 'failed',
 };
 
 const DATE_FILTERS = [
@@ -41,13 +40,13 @@ const DATE_FILTERS = [
 const BLANK_ROW_DATA = {
   customerName: '',
   modelName: '',
-  fuelType: '',        // one of: PETROL | DIESEL | EV | CNG | ''
+  fuelType: '',
   locationId: '',
   salespersonId: '',
   remarks: '',
+  transcript: '',
 };
 
-// Fuel options matching the fuel_type table codes
 const FUEL_OPTIONS = [
   { code: 'PETROL', label: 'Petrol' },
   { code: 'DIESEL', label: 'Diesel' },
@@ -55,21 +54,83 @@ const FUEL_OPTIONS = [
   { code: 'CNG',    label: 'CNG' },
 ];
 
+// ─── AI Pipeline ──────────────────────────────────────────────────────────────
+
+async function whisperTranscribe(recordingUrl) {
+  if (!OPENAI_API_KEY) throw new Error('VITE_OPENAI_API_KEY not set in .env');
+
+  const audioRes = await fetch(recordingUrl);
+  if (!audioRes.ok) throw new Error(`Could not fetch recording (${audioRes.status})`);
+  const audioBlob = await audioRes.blob();
+  const audioFile = new File([audioBlob], 'recording.mp3', { type: 'audio/mpeg' });
+
+  const formData = new FormData();
+  formData.append('file', audioFile);
+  formData.append('model', 'whisper-1');
+  formData.append('language', 'hi');
+  formData.append('response_format', 'text');
+
+  const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
+    body: formData,
+  });
+
+  if (!res.ok) throw new Error(`Whisper error (${res.status}): ${await res.text()}`);
+  return (await res.text()).trim();
+}
+
+async function claudeExtract(transcript, availableCars, hasPhoneMatch) {
+  const carList = availableCars.map(c => c.name).join(', ') || 'Nexon, Punch, Tiago, Harrier, Safari, Altroz, Curvv';
+  const caLine = hasPhoneMatch
+    ? 'Do NOT extract CA name — already matched from phone.'
+    : 'Extract the CA/advisor name if mentioned.';
+
+  const prompt = `You are a data extraction assistant for a Tata Motors dealership in India.
+Transcript of an IVR sales call (Hindi/English/Hinglish):
+
+Available models: ${carList}
+Fuel types: PETROL, DIESEL, EV, CNG
+
+Extract:
+1. Customer name (look for "mera naam", "I am", direct introduction)
+2. ${caLine}
+3. Car model — match EXACTLY to available models or null
+4. Fuel type — PETROL/DIESEL/EV/CNG or null
+5. SHORT summary — 2-3 sentences in English
+
+Respond ONLY with valid JSON, no markdown:
+{"customerName":"string or null","caName":"string or null","modelName":"exact model or null","fuelType":"PETROL/DIESEL/EV/CNG or null","summary":"2-3 sentence summary"}
+
+Transcript:
+${transcript}`;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 500,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+
+  if (!res.ok) throw new Error(`Claude error (${res.status}): ${await res.text()}`);
+
+  const data = await res.json();
+  const raw = data.content?.map(b => b.text || '').join('') || '';
+  try {
+    return JSON.parse(raw.replace(/```json|```/g, '').trim());
+  } catch {
+    return { customerName: null, caName: null, modelName: null, fuelType: null, summary: raw.slice(0, 300) };
+  }
+}
+
 // ─── CSV / number helpers ─────────────────────────────────────────────────────
 
-/**
- * Converts any phone number representation to a clean 10-digit string.
- * Handles:
- *   - Scientific notation:  7.877623012e+09  → '7877623012'
- *   - +91 prefix:           +919216026772    → '9216026772'
- *   - Plain 10-digit:       9876543210       → '9876543210'
- * Returns null if not a valid 10-digit number.
- */
 function normalizePhone(raw) {
   if (!raw) return null;
   const str = String(raw).trim();
-
-  // Handle scientific notation (e.g. 7.877623012e+09)
   let digits;
   if (/e\+/i.test(str)) {
     const n = Math.round(parseFloat(str));
@@ -78,30 +139,16 @@ function normalizePhone(raw) {
   } else {
     digits = str.replace(/\D/g, '');
   }
-
-  // Strip leading country code: 91XXXXXXXXXX → XXXXXXXXXX
-  if (digits.length === 12 && digits.startsWith('91')) {
-    digits = digits.slice(2);
-  }
-  if (digits.length === 11 && digits.startsWith('0')) {
-    digits = digits.slice(1);
-  }
-
+  if (digits.length === 12 && digits.startsWith('91')) digits = digits.slice(2);
+  if (digits.length === 11 && digits.startsWith('0')) digits = digits.slice(1);
   return /^\d{10}$/.test(digits) ? digits : null;
 }
 
-/**
- * Parse CSV text into an array of objects using the first row as headers.
- * Handles quoted fields and trims whitespace from headers.
- */
 function parseCSV(text) {
   const lines = text.trim().split(/\r?\n/);
   if (lines.length < 2) return [];
-
-  const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, ''));
-
-  return lines.slice(1).map((line) => {
-    // Simple CSV split — handles quoted commas
+  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+  return lines.slice(1).map(line => {
     const values = [];
     let current = '';
     let inQuotes = false;
@@ -111,44 +158,30 @@ function parseCSV(text) {
       else { current += ch; }
     }
     values.push(current.trim());
-
     return Object.fromEntries(headers.map((h, i) => [h, values[i] ?? '']));
   });
 }
 
-/**
- * Parse an uploaded File (CSV or Excel-saved-as-CSV).
- * Returns array of { mobile, callDate, connectedToRaw }.
- * Deduplicates by mobile number (keeps first occurrence).
- */
 function parseIVRFile(csvText) {
   const rows = parseCSV(csvText);
   const seen = new Set();
   const results = [];
-
   for (const row of rows) {
-    // Support both exact and case-insensitive column names
     const getCol = (name) => {
       const key = Object.keys(row).find(
-        (k) => k.toLowerCase().replace(/\s+/g, '') === name.toLowerCase().replace(/\s+/g, '')
+        k => k.toLowerCase().replace(/\s+/g, '') === name.toLowerCase().replace(/\s+/g, '')
       );
       return key ? row[key] : '';
     };
-
     const mobile = normalizePhone(getCol('CustomerNumber'));
     if (!mobile || seen.has(mobile)) continue;
     seen.add(mobile);
-
-    // CallDate — expect YYYY-MM-DD
     const rawDate = getCol('CallDate')?.trim();
     const callDate = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : null;
-
-    // ConnectedTo — the salesperson's phone number
     const connectedToRaw = getCol('ConnectedTo')?.trim() || null;
-
-    results.push({ mobile, callDate, connectedToRaw });
+    const callRecordingUrl = getCol('CallRecording')?.trim() || null;
+    results.push({ mobile, callDate, connectedToRaw, callRecordingUrl });
   }
-
   return results;
 }
 
@@ -202,12 +235,32 @@ function normalizeOptyStatus(entry) {
   return { label: 'Pending', color: 'bg-orange-100 text-orange-600' };
 }
 
+// ─── Transcript viewer modal ──────────────────────────────────────────────────
+
+function TranscriptModal({ transcript, onClose }) {
+  if (!transcript) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full p-6 max-h-[80vh] flex flex-col"
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base font-semibold text-slate-800">Full Call Transcript</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+        </div>
+        <div className="overflow-y-auto flex-1 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap bg-slate-50 rounded-xl p-4 border border-slate-200">
+          {transcript}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── All Entries service ──────────────────────────────────────────────────────
 
 async function fetchIVREntries(dateFilter) {
   let query = supabase
     .from(AI_LEADS_TABLE)
-    .select('id, customer_name, mobile_number, model_name, fuel_type, salesperson_id, location_id, remarks, lead_source, opty_status, lead_disposition, call_datetime, created_at, updated_at')
+    .select('id, customer_name, mobile_number, model_name, fuel_type, salesperson_id, location_id, remarks, transcript, lead_source, opty_status, lead_disposition, call_datetime, created_at, updated_at')
     .eq('lead_source', 'IVR')
     .order('created_at', { ascending: false })
     .range(0, 9999);
@@ -221,8 +274,8 @@ async function fetchIVREntries(dateFilter) {
   if (error) throw error;
   const rows = data || [];
 
-  const salespersonIds = [...new Set(rows.map((r) => r.salesperson_id).filter(Boolean))];
-  const locationIds = [...new Set(rows.map((r) => r.location_id).filter(Boolean))];
+  const salespersonIds = [...new Set(rows.map(r => r.salesperson_id).filter(Boolean))];
+  const locationIds = [...new Set(rows.map(r => r.location_id).filter(Boolean))];
 
   const [empResult, locResult] = await Promise.all([
     salespersonIds.length
@@ -236,10 +289,10 @@ async function fetchIVREntries(dateFilter) {
   if (empResult.error) throw empResult.error;
   if (locResult.error) throw locResult.error;
 
-  const empById = new Map((empResult.data || []).map((e) => [e.id, e]));
-  const locById = new Map((locResult.data || []).map((l) => [l.id, l]));
+  const empById = new Map((empResult.data || []).map(e => [e.id, e]));
+  const locById = new Map((locResult.data || []).map(l => [l.id, l]));
 
-  return rows.map((row) => ({
+  return rows.map(row => ({
     ...row,
     salesperson_name: row.salesperson_id ? (getDisplayName(empById.get(row.salesperson_id)) || '—') : '—',
     location_name: row.location_id ? (locById.get(row.location_id)?.name || '—') : '—',
@@ -257,31 +310,20 @@ async function updateIVREntry(id, payload) {
 
 // ─── Employee lookup by mobile ────────────────────────────────────────────────
 
-/**
- * Given an array of raw ConnectedTo values (e.g. '+919216026772'),
- * queries the employees table by mobile and returns a Map of
- * normalizedPhone → employee row.
- */
 async function fetchEmployeesByMobile(rawPhones) {
   const normalized = [...new Set(rawPhones.map(normalizePhone).filter(Boolean))];
   if (!normalized.length) return new Map();
-
-  // employees.mobile may be stored as 10-digit or with +91
-  // Query both forms to be safe
-  const withCountryCode = normalized.map((m) => `+91${m}`);
+  const withCountryCode = normalized.map(m => `+91${m}`);
   const allVariants = [...normalized, ...withCountryCode];
-
   const { data, error } = await supabase
     .from(EMPLOYEES_TABLE)
     .select('id, first_name, last_name, mobile, location_id')
     .in('mobile', allVariants);
-
   if (error) throw error;
-
   const map = new Map();
   for (const emp of data || []) {
-    const normalized10 = normalizePhone(emp.mobile);
-    if (normalized10) map.set(normalized10, emp);
+    const n = normalizePhone(emp.mobile);
+    if (n) map.set(n, emp);
   }
   return map;
 }
@@ -295,15 +337,16 @@ function AllEntriesRow({ entry, cars, locations, onSaved }) {
   const [loadingSP, setLoadingSP] = useState(false);
   const [saving, setSaving] = useState(false);
   const [rowError, setRowError] = useState('');
+  const [showTranscript, setShowTranscript] = useState(false);
 
-  const setD = (field, value) => setDraft((prev) => ({ ...prev, [field]: value }));
+  const setD = (field, value) => setDraft(prev => ({ ...prev, [field]: value }));
 
   useEffect(() => {
     if (!editing || !draft.location_id) { setSalespersons([]); return; }
     let mounted = true;
     setLoadingSP(true);
     getSalesPersonsByLocation(draft.location_id)
-      .then((res) => { if (mounted) setSalespersons(res || []); })
+      .then(res => { if (mounted) setSalespersons(res || []); })
       .catch(() => { if (mounted) setSalespersons([]); })
       .finally(() => { if (mounted) setLoadingSP(false); });
     return () => { mounted = false; };
@@ -356,44 +399,49 @@ function AllEntriesRow({ entry, cars, locations, onSaved }) {
         <td className="px-3 py-2">
           <input autoFocus type="text" className="kiosk-input !min-h-[34px] !py-1 !text-sm w-full"
             value={draft.customer_name} placeholder="Customer name"
-            onChange={(e) => setD('customer_name', e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Escape') handleCancel(); }} />
+            onChange={e => setD('customer_name', e.target.value)}
+            onKeyDown={e => { if (e.key === 'Escape') handleCancel(); }} />
         </td>
         <td className="px-3 py-2 text-sm text-slate-700 font-mono">{entry.mobile_number}</td>
         <td className="px-3 py-2">
           <select className="kiosk-select !min-h-[34px] !py-1 !text-sm w-full"
-            value={draft.model_name} onChange={(e) => setD('model_name', e.target.value)}>
+            value={draft.model_name} onChange={e => setD('model_name', e.target.value)}>
             <option value="">— Model —</option>
-            {cars.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+            {cars.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
           </select>
         </td>
         <td className="px-3 py-2">
           <select className="kiosk-select !min-h-[34px] !py-1 !text-sm w-full"
-            value={draft.fuel_type} onChange={(e) => setD('fuel_type', e.target.value)}>
+            value={draft.fuel_type} onChange={e => setD('fuel_type', e.target.value)}>
             <option value="">— Fuel —</option>
-            {FUEL_OPTIONS.map((f) => <option key={f.code} value={f.code}>{f.label}</option>)}
+            {FUEL_OPTIONS.map(f => <option key={f.code} value={f.code}>{f.label}</option>)}
           </select>
         </td>
         <td className="px-3 py-2">
           <select className="kiosk-select !min-h-[34px] !py-1 !text-sm w-full"
-            value={draft.location_id} onChange={(e) => setD('location_id', e.target.value)}>
+            value={draft.location_id} onChange={e => setD('location_id', e.target.value)}>
             <option value="">— Branch —</option>
-            {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            {locations.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
         </td>
         <td className="px-3 py-2">
           <select className="kiosk-select !min-h-[34px] !py-1 !text-sm w-full"
-            value={draft.salesperson_id} onChange={(e) => setD('salesperson_id', e.target.value)}
+            value={draft.salesperson_id} onChange={e => setD('salesperson_id', e.target.value)}
             disabled={!draft.location_id || loadingSP}>
             <option value="">{!draft.location_id ? 'Select branch first' : '— Advisor —'}</option>
-            {salespersons.map((sp) => <option key={sp.id} value={sp.id}>{getDisplayName(sp)}</option>)}
+            {salespersons.map(sp => <option key={sp.id} value={sp.id}>{getDisplayName(sp)}</option>)}
           </select>
         </td>
         <td className="px-3 py-2">
           <input type="text" className="kiosk-input !min-h-[34px] !py-1 !text-sm w-full"
             value={draft.remarks} placeholder="Remarks"
-            onChange={(e) => setD('remarks', e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') handleCancel(); }} />
+            onChange={e => setD('remarks', e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') handleCancel(); }} />
+        </td>
+        <td className="px-3 py-2 text-xs text-slate-400">
+          {entry.transcript
+            ? <button type="button" onClick={() => setShowTranscript(true)} className="text-blue-500 underline hover:text-blue-700">View</button>
+            : <span className="text-slate-300">—</span>}
         </td>
         <td className="px-3 py-2"><span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${statusColor}`}>{statusLabel}</span></td>
         <td className="px-3 py-2"><span className="text-[11px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 font-semibold">{normalizeLeadSource(entry.lead_source)}</span></td>
@@ -410,6 +458,7 @@ function AllEntriesRow({ entry, cars, locations, onSaved }) {
           </div>
           {rowError && <p className="text-[10px] text-red-600 mt-1 text-right">{rowError}</p>}
         </td>
+        {showTranscript && <TranscriptModal transcript={entry.transcript} onClose={() => setShowTranscript(false)} />}
       </tr>
     );
   }
@@ -430,6 +479,15 @@ function AllEntriesRow({ entry, cars, locations, onSaved }) {
       <td className="px-3 py-2.5 text-sm text-slate-700">{entry.salesperson_name}</td>
       <td className="px-3 py-2.5 text-xs text-slate-500 max-w-[160px] truncate" title={entry.remarks || ''}>
         {entry.remarks || <span className="text-slate-300">—</span>}
+      </td>
+      <td className="px-3 py-2.5 text-xs max-w-[120px]">
+        {entry.transcript ? (
+          <>
+            <button type="button" onClick={() => setShowTranscript(true)}
+              className="text-blue-500 underline hover:text-blue-700">View transcript</button>
+            {showTranscript && <TranscriptModal transcript={entry.transcript} onClose={() => setShowTranscript(false)} />}
+          </>
+        ) : <span className="text-slate-300">—</span>}
       </td>
       <td className="px-3 py-2.5"><span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${statusColor}`}>{statusLabel}</span></td>
       <td className="px-3 py-2.5"><span className="text-[11px] px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 font-semibold">{normalizeLeadSource(entry.lead_source)}</span></td>
@@ -462,7 +520,7 @@ function AllEntriesTab({ cars, locations }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const filtered = entries.filter((e) => {
+  const filtered = entries.filter(e => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     return (
@@ -479,7 +537,7 @@ function AllEntriesTab({ cars, locations }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex gap-1.5">
-          {DATE_FILTERS.map((f) => (
+          {DATE_FILTERS.map(f => (
             <button key={f.value} type="button" onClick={() => setDateFilter(f.value)}
               className={`text-xs px-3 py-1.5 rounded-xl font-semibold transition-colors ${dateFilter === f.value ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
               {f.label}
@@ -489,7 +547,7 @@ function AllEntriesTab({ cars, locations }) {
         <div className="flex gap-2">
           <input type="text" className="kiosk-input !min-h-[36px] !py-1.5 !text-sm w-52"
             placeholder="Search name, mobile, model…" value={search}
-            onChange={(e) => setSearch(e.target.value)} />
+            onChange={e => setSearch(e.target.value)} />
           <button type="button" onClick={load} disabled={loading}
             className="text-[11px] px-3 py-1.5 rounded-xl border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 font-semibold">
             {loading ? '…' : '↻ Refresh'}
@@ -508,7 +566,7 @@ function AllEntriesTab({ cars, locations }) {
         <div className="rounded-2xl border border-dashed border-slate-200 py-16 text-center text-slate-400 text-sm">No entries found</div>
       ) : (
         <div className="overflow-x-auto rounded-2xl border border-slate-200">
-          <table className="walkin-table !mt-0 min-w-[1100px]">
+          <table className="walkin-table !mt-0 min-w-[1300px]">
             <thead className="bg-slate-50">
               <tr>
                 <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left whitespace-nowrap">Entry Date</th>
@@ -520,13 +578,14 @@ function AllEntriesTab({ cars, locations }) {
                 <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Branch</th>
                 <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Sales Advisor</th>
                 <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Remarks</th>
+                <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Transcript</th>
                 <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Status</th>
                 <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Source</th>
                 <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-right">Action</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((entry) => (
+              {filtered.map(entry => (
                 <AllEntriesRow key={entry.id} entry={entry} cars={cars} locations={locations} onSaved={load} />
               ))}
             </tbody>
@@ -545,22 +604,36 @@ function IVRRow({
 }) {
   const [data, setData] = useState(() => ({
     ...BLANK_ROW_DATA,
-    // Pre-fill salesperson if matched from CSV
     salespersonId: row.matchedSalespersonId || '',
     locationId: row.matchedLocationId || '',
   }));
   const [salespersons, setSalespersons] = useState(
-    // Pre-populate with matched salesperson so it shows in the dropdown
     row.matchedSalesperson ? [row.matchedSalesperson] : []
   );
   const [loadingSP, setLoadingSP] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [showTranscript, setShowTranscript] = useState(false);
 
   const customerNameRef = useRef(null);
   const modelRef = useRef(null);
-  const branchRef = useRef(null);
-  const advisorRef = useRef(null);
   const remarksRef = useRef(null);
+
+  // When AI result arrives on row, auto-fill fields and expand form
+  useEffect(() => {
+    if (!row.aiResult) return;
+    const { customerName, caName, modelName, fuelType, summary, transcript } = row.aiResult;
+    setData(prev => ({
+      ...prev,
+      customerName: customerName || prev.customerName,
+      modelName: modelName || prev.modelName,
+      fuelType: fuelType || prev.fuelType,
+      remarks: summary || prev.remarks,
+      transcript: transcript || prev.transcript,
+      // Use caName only as fallback when no phone match found
+      salespersonId: prev.salespersonId,
+    }));
+    setExpanded(true);
+  }, [row.aiResult]);
 
   useEffect(() => {
     let mounted = true;
@@ -570,13 +643,13 @@ function IVRRow({
     }
     setLoadingSP(true);
     getSalesPersonsByLocation(data.locationId)
-      .then((res) => { if (mounted) { setSalespersons(res || []); } })
+      .then(res => { if (mounted) setSalespersons(res || []); })
       .catch(() => { if (mounted) setSalespersons([]); })
       .finally(() => { if (mounted) setLoadingSP(false); });
     return () => { mounted = false; };
   }, [data.locationId]);
 
-  const set = (field, value) => setData((prev) => ({ ...prev, [field]: value }));
+  const set = (field, value) => setData(prev => ({ ...prev, [field]: value }));
   const isDone = row.status === STATUS.SAVED || row.status === STATUS.UNINTERESTED;
   const isSaving = row.status === STATUS.SAVING;
 
@@ -607,6 +680,19 @@ function IVRRow({
     if (e.key === 'Enter') { e.preventDefault(); handleSave(); }
   }, [handleSave]);
 
+  const aiBadge = () => {
+    if (!row.callRecordingUrl) return <span className="text-slate-300 text-[10px]">No recording</span>;
+    if (row.aiStatus === AI_STATUS.TRANSCRIBING)
+      return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-600 animate-pulse font-semibold">🎙 Transcribing…</span>;
+    if (row.aiStatus === AI_STATUS.EXTRACTING)
+      return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-600 animate-pulse font-semibold">✨ Extracting…</span>;
+    if (row.aiStatus === AI_STATUS.DONE)
+      return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">✓ AI Filled</span>;
+    if (row.aiStatus === AI_STATUS.FAILED)
+      return <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 font-semibold" title={row.aiError}>⚠ Failed</span>;
+    return null;
+  };
+
   return (
     <tbody>
       <tr className={`border-b border-slate-100 transition-colors ${rowBg}`} onKeyDown={handleRowKeyDown}>
@@ -615,16 +701,12 @@ function IVRRow({
         <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap w-28">
           {row.callDate || <span className="text-slate-300">—</span>}
         </td>
-        {/* Salesperson match indicator */}
         <td className="px-3 py-2 text-xs w-36">
-          {row.matchedSalesperson ? (
-            <span className="text-emerald-700 font-medium">
-              ✓ {getDisplayName(row.matchedSalesperson)}
-            </span>
-          ) : (
-            <span className="text-slate-300">No match</span>
-          )}
+          {row.matchedSalesperson
+            ? <span className="text-emerald-700 font-medium">✓ {getDisplayName(row.matchedSalesperson)}</span>
+            : <span className="text-slate-300">No match</span>}
         </td>
+        <td className="px-3 py-2 text-xs w-32">{aiBadge()}</td>
         <td className="px-3 py-2 w-28">
           {row.status === STATUS.SAVED && <span className="text-[11px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-semibold">✓ Saved</span>}
           {row.status === STATUS.UNINTERESTED && <span className="text-[11px] px-2 py-0.5 rounded-full bg-red-100 text-red-600 font-semibold">Uninterested</span>}
@@ -633,8 +715,10 @@ function IVRRow({
           {row.status === STATUS.SAVING && <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-600 animate-pulse">Saving…</span>}
         </td>
         <td className="px-3 py-2 text-xs text-slate-500">
-          {row.status === STATUS.SAVED && row.savedSummary ? <span>{row.savedSummary}</span>
-            : row.status === STATUS.ERROR ? <span className="text-yellow-700">{row.errorMessage}</span>
+          {row.status === STATUS.SAVED && row.savedSummary
+            ? <span>{row.savedSummary}</span>
+            : row.status === STATUS.ERROR
+            ? <span className="text-yellow-700">{row.errorMessage}</span>
             : null}
         </td>
         <td className="px-3 py-2 text-right whitespace-nowrap">
@@ -644,7 +728,7 @@ function IVRRow({
                 <button ref={interestedBtnRef} type="button"
                   className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
                   onClick={() => { setExpanded(true); setTimeout(() => customerNameRef.current?.focus(), 50); }}
-                  disabled={isSaving} title="Enter/Space · U = Uninterested">
+                  disabled={isSaving} title="U = Uninterested">
                   Interested
                 </button>
               ) : (
@@ -680,58 +764,66 @@ function IVRRow({
               <kbd className="bg-white border border-slate-200 rounded px-1 font-mono">Enter</kbd> on Remarks saves &nbsp;·&nbsp;
               <kbd className="bg-white border border-slate-200 rounded px-1 font-mono">U</kbd> Uninterested
             </p>
-            <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 lg:grid-cols-5">
+            <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 lg:grid-cols-6">
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
                 Customer Name
                 <input ref={customerNameRef} type="text" className="kiosk-input !min-h-[36px] !py-1.5 !text-sm"
                   placeholder="Optional" value={data.customerName}
-                  onChange={(e) => set('customerName', e.target.value)}
-                  onKeyDown={(e) => chainEnter(e, modelRef)} />
+                  onChange={e => set('customerName', e.target.value)}
+                  onKeyDown={e => chainEnter(e, modelRef)} />
               </label>
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
                 Model
                 <select ref={modelRef} className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
-                  value={data.modelName} onChange={(e) => set('modelName', e.target.value)} disabled={loadingCars}>
+                  value={data.modelName} onChange={e => set('modelName', e.target.value)} disabled={loadingCars}>
                   <option value="">{loadingCars ? 'Loading…' : 'Optional'}</option>
-                  {cars.map((car) => <option key={car.id} value={car.name}>{car.name}</option>)}
+                  {cars.map(car => <option key={car.id} value={car.name}>{car.name}</option>)}
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
-                Fuel <span className="font-normal text-slate-400">(optional)</span>
+                Fuel
                 <select className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
-                  value={data.fuelType} onChange={(e) => set('fuelType', e.target.value)}>
+                  value={data.fuelType} onChange={e => set('fuelType', e.target.value)}>
                   <option value="">Optional</option>
-                  {FUEL_OPTIONS.map((f) => <option key={f.code} value={f.code}>{f.label}</option>)}
+                  {FUEL_OPTIONS.map(f => <option key={f.code} value={f.code}>{f.label}</option>)}
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
-                Branch <span className="font-normal text-slate-400">(optional)</span>
-                <select ref={branchRef} className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
-                  value={data.locationId} onChange={(e) => set('locationId', e.target.value)} disabled={loadingLocations}>
+                Branch
+                <select className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
+                  value={data.locationId} onChange={e => set('locationId', e.target.value)} disabled={loadingLocations}>
                   <option value="">{loadingLocations ? 'Loading…' : 'Select branch'}</option>
-                  {locations.map((loc) => <option key={loc.id} value={loc.id}>{loc.name || `Branch #${loc.id}`}</option>)}
+                  {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name || `Branch #${loc.id}`}</option>)}
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
-                Sales Advisor <span className="font-normal text-slate-400">(optional)</span>
-                <select ref={advisorRef} className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
-                  value={data.salespersonId} onChange={(e) => set('salespersonId', e.target.value)}
+                Sales Advisor
+                <select className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
+                  value={data.salespersonId} onChange={e => set('salespersonId', e.target.value)}
                   disabled={loadingSP}>
                   <option value="">{loadingSP ? 'Loading…' : 'Select advisor'}</option>
-                  {salespersons.map((sp) => <option key={sp.id} value={sp.id}>{getDisplayName(sp)}</option>)}
+                  {salespersons.map(sp => <option key={sp.id} value={sp.id}>{getDisplayName(sp)}</option>)}
                 </select>
               </label>
-              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600 col-span-2 md:col-span-1">
-                Remarks
+              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
+                Remarks <span className="font-normal text-slate-400">(AI summary)</span>
                 <input ref={remarksRef} type="text" className="kiosk-input !min-h-[36px] !py-1.5 !text-sm"
                   placeholder="Optional · Enter to save" value={data.remarks}
-                  onChange={(e) => set('remarks', e.target.value)}
+                  onChange={e => set('remarks', e.target.value)}
                   onKeyDown={handleRemarksKeyDown} />
               </label>
             </div>
+            {data.transcript && (
+              <div className="mt-2.5 flex items-center gap-2 text-xs">
+                <span className="text-purple-600 font-semibold">📄 Transcript ready</span>
+                <button type="button" onClick={() => setShowTranscript(true)}
+                  className="text-blue-500 underline hover:text-blue-700">View full transcript</button>
+              </div>
+            )}
           </td>
         </tr>
       )}
+      {showTranscript && <TranscriptModal transcript={data.transcript} onClose={() => setShowTranscript(false)} />}
     </tbody>
   );
 }
@@ -740,17 +832,13 @@ function IVRRow({
 
 export default function IVREntryScreen() {
   const [activeTab, setActiveTab] = useState('entry');
-
-  // File upload state
   const [fileError, setFileError] = useState('');
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef(null);
 
-  // Table state
   const [rows, setRows] = useState([]);
   const [hasImported, setHasImported] = useState(false);
 
-  // Shared lookup data
   const [cars, setCars] = useState([]);
   const [locations, setLocations] = useState([]);
   const [loadingCars, setLoadingCars] = useState(true);
@@ -761,7 +849,7 @@ export default function IVREntryScreen() {
   useEffect(() => {
     let mounted = true;
     getAvailableCars()
-      .then((data) => { if (mounted) setCars((data || []).filter((c) => c?.name?.trim())); })
+      .then(data => { if (mounted) setCars((data || []).filter(c => c?.name?.trim())); })
       .catch(() => {})
       .finally(() => { if (mounted) setLoadingCars(false); });
     return () => { mounted = false; };
@@ -770,14 +858,41 @@ export default function IVREntryScreen() {
   useEffect(() => {
     let mounted = true;
     getLocations()
-      .then((data) => { if (mounted) setLocations(data || []); })
+      .then(data => { if (mounted) setLocations(data || []); })
       .catch(() => {})
       .finally(() => { if (mounted) setLoadingLocations(false); });
     return () => { mounted = false; };
   }, []);
 
-  // ── File upload handler ──────────────────────────────────────────────────────
+  // ── Run AI pipeline for one row ──────────────────────────────────────────────
+  const processRowAI = useCallback((rowId, recordingUrl, hasPhoneMatch, carsSnapshot) => {
+    // Mark as transcribing immediately
+    setRows(prev => prev.map(r => r.id === rowId ? { ...r, aiStatus: AI_STATUS.TRANSCRIBING } : r));
 
+    (async () => {
+      try {
+        const transcript = await whisperTranscribe(recordingUrl);
+
+        setRows(prev => prev.map(r => r.id === rowId ? { ...r, aiStatus: AI_STATUS.EXTRACTING } : r));
+
+        const extracted = await claudeExtract(transcript, carsSnapshot, hasPhoneMatch);
+
+        setRows(prev => prev.map(r => r.id === rowId ? {
+          ...r,
+          aiStatus: AI_STATUS.DONE,
+          aiResult: { transcript, ...extracted },
+        } : r));
+      } catch (err) {
+        setRows(prev => prev.map(r => r.id === rowId ? {
+          ...r,
+          aiStatus: AI_STATUS.FAILED,
+          aiError: err?.message || 'Processing failed',
+        } : r));
+      }
+    })();
+  }, []);
+
+  // ── File upload handler ──────────────────────────────────────────────────────
   const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -798,36 +913,29 @@ export default function IVREntryScreen() {
       let text;
 
       if (isZip) {
-        // Dynamically load JSZip from CDN on first use
         if (!window.JSZip) {
           await new Promise((resolve, reject) => {
             const script = document.createElement('script');
             script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
             script.onload = resolve;
-            script.onerror = () => reject(new Error('Failed to load ZIP library. Check your internet connection.'));
+            script.onerror = () => reject(new Error('Failed to load ZIP library.'));
             document.head.appendChild(script);
           });
         }
-
         const arrayBuffer = await file.arrayBuffer();
         const zip = await window.JSZip.loadAsync(arrayBuffer);
-
-        // Find the first CSV file inside the zip
-        const csvFile = Object.values(zip.files).find(
-          (f) => !f.dir && f.name.toLowerCase().endsWith('.csv')
-        );
-
+        const csvFile = Object.values(zip.files).find(f => !f.dir && f.name.toLowerCase().endsWith('.csv'));
         if (!csvFile) {
-          setFileError('No CSV file found inside the ZIP. Please check the downloaded file.');
+          setFileError('No CSV file found inside the ZIP.');
           setImporting(false);
           e.target.value = '';
           return;
         }
-
         text = await csvFile.async('text');
       } else {
         text = await file.text();
       }
+
       const parsed = parseIVRFile(text);
 
       if (parsed.length === 0) {
@@ -837,24 +945,26 @@ export default function IVREntryScreen() {
         return;
       }
 
-      // Look up salespeople by ConnectedTo phone numbers
-      const connectedPhones = parsed.map((r) => r.connectedToRaw).filter(Boolean);
+      const connectedPhones = parsed.map(r => r.connectedToRaw).filter(Boolean);
       const empByMobile = await fetchEmployeesByMobile(connectedPhones);
 
-      const newRows = parsed.map(({ mobile, callDate, connectedToRaw }, index) => {
+      const newRows = parsed.map(({ mobile, callDate, connectedToRaw, callRecordingUrl }, index) => {
         const connectedNormalized = normalizePhone(connectedToRaw);
         const matchedSalesperson = connectedNormalized ? empByMobile.get(connectedNormalized) || null : null;
-
         return {
           id: `${mobile}-${index}`,
           index,
           mobile,
           callDate,
           connectedToRaw,
+          callRecordingUrl: callRecordingUrl || null,
           matchedSalesperson,
           matchedSalespersonId: matchedSalesperson?.id ? String(matchedSalesperson.id) : '',
           matchedLocationId: matchedSalesperson?.location_id ? String(matchedSalesperson.location_id) : '',
           status: STATUS.PENDING,
+          aiStatus: callRecordingUrl ? AI_STATUS.TRANSCRIBING : null,
+          aiResult: null,
+          aiError: null,
           savedSummary: null,
           errorMessage: null,
         };
@@ -868,11 +978,22 @@ export default function IVREntryScreen() {
         if (firstId) interestedBtnRefs.current[firstId]?.focus();
       }, 100);
 
+      // Snapshot cars at upload time and kick off AI pipeline for all rows with recordings
+      // Stagger by 1.5s each to avoid hammering the APIs simultaneously
+      const carsSnapshot = cars;
+      newRows
+        .filter(r => r.callRecordingUrl)
+        .forEach((r, i) => {
+          setTimeout(() => {
+            processRowAI(r.id, r.callRecordingUrl, !!r.matchedSalesperson, carsSnapshot);
+          }, i * 1500);
+        });
+
     } catch (err) {
       setFileError(err?.message || 'Failed to parse file.');
     } finally {
       setImporting(false);
-      e.target.value = ''; // reset so same file can be re-uploaded
+      e.target.value = '';
     }
   };
 
@@ -886,12 +1007,12 @@ export default function IVREntryScreen() {
   // ── Row actions ──────────────────────────────────────────────────────────────
 
   const setRowStatus = useCallback((rowId, status, extra = {}) => {
-    setRows((prev) => prev.map((r) => r.id === rowId ? { ...r, status, ...extra } : r));
+    setRows(prev => prev.map(r => r.id === rowId ? { ...r, status, ...extra } : r));
   }, []);
 
   const focusNextPendingRow = useCallback((afterRowId) => {
-    setRows((currentRows) => {
-      const afterIndex = currentRows.findIndex((r) => r.id === afterRowId);
+    setRows(currentRows => {
+      const afterIndex = currentRows.findIndex(r => r.id === afterRowId);
       const nextPending = currentRows.find((r, i) => i > afterIndex && r.status === STATUS.PENDING);
       if (nextPending) setTimeout(() => interestedBtnRefs.current[nextPending.id]?.focus(), 60);
       return currentRows;
@@ -903,7 +1024,7 @@ export default function IVREntryScreen() {
   }, [setRowStatus]);
 
   const handleSaveInterested = useCallback(async (rowId, data) => {
-    const row = rows.find((r) => r.id === rowId);
+    const row = rows.find(r => r.id === rowId);
     if (!row) return;
     setRowStatus(rowId, STATUS.SAVING);
     try {
@@ -915,6 +1036,7 @@ export default function IVREntryScreen() {
         salesperson_id: data.salespersonId || null,
         location_id: data.locationId || null,
         remarks: data.remarks.trim() || null,
+        transcript: data.transcript || null,
         call_datetime: row.callDate ? new Date(row.callDate).toISOString() : null,
       });
       const parts = [];
@@ -933,23 +1055,24 @@ export default function IVREntryScreen() {
       if (r.status === STATUS.SAVED) acc.saved++;
       else if (r.status === STATUS.UNINTERESTED) acc.uninterested++;
       else acc.pending++;
+      if (r.aiStatus === AI_STATUS.DONE) acc.aiDone++;
+      else if (r.aiStatus === AI_STATUS.TRANSCRIBING || r.aiStatus === AI_STATUS.EXTRACTING) acc.aiProcessing++;
       return acc;
     },
-    { saved: 0, uninterested: 0, pending: 0 }
+    { saved: 0, uninterested: 0, pending: 0, aiDone: 0, aiProcessing: 0 }
   );
 
-  const matchedCount = rows.filter((r) => r.matchedSalesperson).length;
+  const matchedCount = rows.filter(r => r.matchedSalesperson).length;
 
   return (
-    <section className="kiosk-card mx-auto w-full rounded-2xl p-6 shadow-lg" style={{ maxWidth: '1150px' }}>
+    <section className="kiosk-card mx-auto w-full rounded-2xl p-6 shadow-lg" style={{ maxWidth: '1200px' }}>
       <h1 className="kiosk-title !mb-1 text-4xl">IVR Lead Entry</h1>
       <p className="mb-5 text-base text-slate-600">
-        Upload your IVR call report CSV. Sales advisors are matched automatically from <code className="bg-slate-100 rounded px-1 text-sm">ConnectedTo</code>.
+        Upload your IVR call report ZIP. Calls are transcribed automatically — fields pre-fill as each recording is processed.
       </p>
 
-      {/* Tab toggle */}
       <div className="mb-6 flex gap-1 rounded-2xl bg-slate-100 p-1 w-fit">
-        {[{ id: 'entry', label: '+ New Entry' }, { id: 'all', label: 'All Entries' }].map((tab) => (
+        {[{ id: 'entry', label: '+ New Entry' }, { id: 'all', label: 'All Entries' }].map(tab => (
           <button key={tab.id} type="button" onClick={() => setActiveTab(tab.id)}
             className={`px-5 py-2 rounded-xl text-sm font-semibold transition-all ${activeTab === tab.id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
             {tab.label}
@@ -957,16 +1080,14 @@ export default function IVREntryScreen() {
         ))}
       </div>
 
-      {/* ── Entry Tab ── */}
       {activeTab === 'entry' && (
         !hasImported ? (
           <div className="space-y-5">
-            {/* Upload area */}
             <div
               className="rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 px-8 py-12 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors"
               onClick={() => fileInputRef.current?.click()}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
+              onDragOver={e => e.preventDefault()}
+              onDrop={e => {
                 e.preventDefault();
                 const file = e.dataTransfer.files?.[0];
                 if (file) {
@@ -982,37 +1103,28 @@ export default function IVREntryScreen() {
                 {importing ? 'Processing file…' : 'Upload IVR Call Report (ZIP or CSV)'}
               </p>
               <p className="text-sm text-slate-500 mb-4">
-                Click to browse or drag &amp; drop your ZIP or CSV file here
+                Click to browse or drag &amp; drop · Calls will be auto-transcribed after upload
               </p>
               <div className="inline-flex items-center gap-2 text-xs text-slate-400 bg-white rounded-xl border border-slate-200 px-4 py-2">
                 <span>Required columns:</span>
                 <code className="bg-slate-100 rounded px-1">CallDate</code>
                 <code className="bg-slate-100 rounded px-1">CustomerNumber</code>
                 <code className="bg-slate-100 rounded px-1">ConnectedTo</code>
+                <code className="bg-slate-100 rounded px-1">CallRecording</code>
               </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".zip,.csv"
-                className="hidden"
-                onChange={handleFileChange}
-              />
+              <input ref={fileInputRef} type="file" accept=".zip,.csv" className="hidden" onChange={handleFileChange} />
             </div>
 
             {fileError && (
-              <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-                {fileError}
-              </div>
+              <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{fileError}</div>
             )}
 
-            {/* Help note */}
             <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800">
-              Upload the <strong>ZIP file</strong> directly as downloaded from your IVR portal. CSV files are also accepted.
+              Upload the <strong>ZIP file</strong> directly from your IVR portal. Each call recording will be transcribed automatically — fields fill in as processing completes.
             </div>
           </div>
         ) : (
           <div className="space-y-3">
-            {/* Keyboard legend */}
             <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-slate-500 bg-slate-50 rounded-xl px-4 py-2.5 border border-slate-200">
               <span><kbd className="bg-white border border-slate-300 rounded px-1.5 py-0.5 font-mono text-[10px]">Enter</kbd> · next field</span>
               <span><kbd className="bg-white border border-slate-300 rounded px-1.5 py-0.5 font-mono text-[10px]">Tab</kbd> · move forward</span>
@@ -1021,7 +1133,6 @@ export default function IVREntryScreen() {
               <span><kbd className="bg-white border border-slate-300 rounded px-1.5 py-0.5 font-mono text-[10px]">Enter</kbd> on Remarks · Save &amp; next</span>
             </div>
 
-            {/* Summary bar */}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap gap-2 text-sm">
                 <span className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-600 font-semibold">Total: {rows.length}</span>
@@ -1029,6 +1140,16 @@ export default function IVREntryScreen() {
                 <span className="px-3 py-1.5 rounded-xl bg-orange-50 text-orange-600 font-semibold">Pending: {counts.pending}</span>
                 <span className="px-3 py-1.5 rounded-xl bg-green-50 text-green-700 font-semibold">Saved: {counts.saved}</span>
                 <span className="px-3 py-1.5 rounded-xl bg-red-50 text-red-600 font-semibold">Uninterested: {counts.uninterested}</span>
+                {counts.aiProcessing > 0 && (
+                  <span className="px-3 py-1.5 rounded-xl bg-purple-50 text-purple-700 font-semibold animate-pulse">
+                    🎙 Transcribing: {counts.aiProcessing}
+                  </span>
+                )}
+                {counts.aiDone > 0 && (
+                  <span className="px-3 py-1.5 rounded-xl bg-purple-100 text-purple-700 font-semibold">
+                    ✓ AI Filled: {counts.aiDone}
+                  </span>
+                )}
               </div>
               <button type="button"
                 className="btn border border-slate-300 text-slate-600 bg-white hover:bg-slate-50 text-sm px-4 h-10 rounded-xl"
@@ -1037,7 +1158,6 @@ export default function IVREntryScreen() {
               </button>
             </div>
 
-            {/* Table */}
             <div className="overflow-x-auto rounded-2xl border border-slate-200">
               <table className="walkin-table !mt-0">
                 <thead className="bg-slate-50">
@@ -1046,12 +1166,13 @@ export default function IVREntryScreen() {
                     <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Mobile</th>
                     <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Call Date</th>
                     <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Advisor Match</th>
+                    <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">AI Status</th>
                     <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Status</th>
                     <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-left">Details</th>
                     <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-right">Actions</th>
                   </tr>
                 </thead>
-                {rows.map((row) => (
+                {rows.map(row => (
                   <IVRRow
                     key={row.id}
                     row={row}
@@ -1062,7 +1183,7 @@ export default function IVREntryScreen() {
                     onMarkUninterested={handleMarkUninterested}
                     onSaveInterested={handleSaveInterested}
                     onFocusNext={() => focusNextPendingRow(row.id)}
-                    interestedBtnRef={(el) => {
+                    interestedBtnRef={el => {
                       if (el) interestedBtnRefs.current[row.id] = el;
                       else delete interestedBtnRefs.current[row.id];
                     }}
@@ -1074,7 +1195,6 @@ export default function IVREntryScreen() {
         )
       )}
 
-      {/* ── All Entries Tab ── */}
       {activeTab === 'all' && (
         <AllEntriesTab cars={cars} locations={locations} />
       )}
