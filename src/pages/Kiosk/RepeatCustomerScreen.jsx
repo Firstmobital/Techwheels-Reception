@@ -3,8 +3,16 @@ export default function RepeatCustomerScreen({
   returningCustomer,
   processing,
   onContinueSamePurpose,
+  onChangeSalesperson,
   onChooseDifferentPurpose
 }) {
+  const formatLastVisitDate = (value) => {
+    if (!value) return 'N/A';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return 'N/A';
+    return date.toLocaleDateString();
+  };
+
   return (
     <section className="kiosk-card mx-auto w-full max-w-[600px] rounded-2xl p-6 text-center shadow-lg">
       
@@ -15,12 +23,19 @@ export default function RepeatCustomerScreen({
 
       <div className="mx-auto mt-2 grid w-full gap-4 rounded-2xl border border-slate-200 bg-white p-6 text-left shadow-lg">
         
+        {/* Last Visit Date */}
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+            Last Visit Date
+          </p>
+          <p className="text-2xl font-bold text-slate-800">
+            {formatLastVisitDate(returningCustomer?.last_visit_date)}
+          </p>
+        </div>
+
         {/* Previous Interest */}
         <div>
           <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-            Last Visit
-          </p>
-          <p className="mt-1 text-sm text-slate-500">
             Previous Interest
           </p>
           <p className="text-2xl font-bold text-slate-800">
@@ -68,6 +83,15 @@ export default function RepeatCustomerScreen({
           disabled={processing}
         >
           {processing ? 'Processing...' : 'Continue with Same Purpose'}
+        </button>
+
+        <button
+          type="button"
+          className="btn h-20 rounded-2xl bg-gradient-to-r from-blue-700 via-sky-600 to-cyan-500 text-white shadow-lg"
+          onClick={onChangeSalesperson}
+          disabled={processing}
+        >
+          Continue but Change Salesperson
         </button>
 
         <button

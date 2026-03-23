@@ -9,6 +9,8 @@ export default function ReceptionDashboard() {
   const [reportData, setReportData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
+  const [selectedSalesperson, setSelectedSalesperson] = useState('all');
+  const [selectedBranch, setSelectedBranch] = useState('all');
 
   const loadReports = useCallback(async () => {
     setLoading(true);
@@ -41,6 +43,9 @@ export default function ReceptionDashboard() {
     return value || fallback;
   };
 
+  const getSalespersonName = (row) =>
+    `${row?.salesperson?.first_name || ''} ${row?.salesperson?.last_name || ''}`.trim();
+
   const getTableValue = (value) => {
     const text = String(value || '').trim();
     return text || '-';
@@ -59,6 +64,50 @@ export default function ReceptionDashboard() {
     if (Number.isNaN(date.getTime())) return '-';
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
+
+  const tableRows = reportData?.rows || [];
+
+  const salespersonOptions = useMemo(() => {
+    const names = new Set();
+    tableRows.forEach((row) => {
+      const name = getSalespersonName(row);
+      if (name) names.add(name);
+    });
+    return ['all', ...Array.from(names).sort((a, b) => a.localeCompare(b))];
+  }, [tableRows]);
+
+  const branchOptions = useMemo(() => {
+    const names = new Set();
+    tableRows.forEach((row) => {
+      const name = String(row?.location?.name || '').trim();
+      if (name) names.add(name);
+    });
+    return ['all', ...Array.from(names).sort((a, b) => a.localeCompare(b))];
+  }, [tableRows]);
+
+  const filteredRows = useMemo(() => {
+    return tableRows.filter((row) => {
+      const salespersonName = getSalespersonName(row);
+      const branchName = String(row?.location?.name || '').trim();
+
+      const matchesSalesperson = selectedSalesperson === 'all' || salespersonName === selectedSalesperson;
+      const matchesBranch = selectedBranch === 'all' || branchName === selectedBranch;
+
+      return matchesSalesperson && matchesBranch;
+    });
+  }, [tableRows, selectedSalesperson, selectedBranch]);
+
+  useEffect(() => {
+    if (selectedSalesperson !== 'all' && !salespersonOptions.includes(selectedSalesperson)) {
+      setSelectedSalesperson('all');
+    }
+  }, [selectedSalesperson, salespersonOptions]);
+
+  useEffect(() => {
+    if (selectedBranch !== 'all' && !branchOptions.includes(selectedBranch)) {
+      setSelectedBranch('all');
+    }
+  }, [selectedBranch, branchOptions]);
 
   if (loading) {
     return (
@@ -232,7 +281,38 @@ export default function ReceptionDashboard() {
           ) : (
             <article className="report-card">
               <h2>Walk-in Rows</h2>
-              <p className="report-meta">Rows: {reportData.rows?.length || 0}</p>
+              <div className="report-filter-row">
+                <select
+                  className="report-date-input"
+                  value={selectedSalesperson}
+                  onChange={(event) => setSelectedSalesperson(event.target.value)}
+                >
+                  <option value="all">All Salespersons</option>
+                  {salespersonOptions
+                    .filter((name) => name !== 'all')
+                    .map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                </select>
+
+                <select
+                  className="report-date-input"
+                  value={selectedBranch}
+                  onChange={(event) => setSelectedBranch(event.target.value)}
+                >
+                  <option value="all">All Branches</option>
+                  {branchOptions
+                    .filter((name) => name !== 'all')
+                    .map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <p className="report-meta">Rows: {filteredRows.length}</p>
               <div style={{ overflowX: 'auto' }}>
                 <table className="walkin-table">
                   <thead>
@@ -249,13 +329,16 @@ export default function ReceptionDashboard() {
                       <th>Token Number</th>
                       <th>Status</th>
                       <th>Opty Status</th>
+                      <th>Opty ID</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {reportData.rows?.length ? (
-                      reportData.rows.map((row) => {
-                        const salespersonName = `${row?.salesperson?.first_name || ''} ${row?.salesperson?.last_name || ''}`.trim();
+                    {filteredRows.length ? (
+                      filteredRows.map((row) => {
+                        const salespersonName = getSalespersonName(row);
                         const fuelTypes = Array.isArray(row?.fuel_types) ? row.fuel_types.join(', ') : '-';
+                        const optyStatus = String(row?.opty_status || '').trim();
+                        const showOptyId = optyStatus.toLowerCase() === 'submitted';
 
                         return (
                           <tr key={row.id}>
@@ -271,12 +354,13 @@ export default function ReceptionDashboard() {
                             <td>{getTableValue(row.token_number)}</td>
                             <td>{getTableValue(row.status)}</td>
                             <td>{getTableValue(row.opty_status)}</td>
+                            <td>{showOptyId ? getTableValue(row.opty_id) : '-'}</td>
                           </tr>
                         );
                       })
                     ) : (
                       <tr>
-                        <td colSpan={12} className="report-list-empty">
+                        <td colSpan={13} className="report-list-empty">
                           No walk-in rows available for this range.
                         </td>
                       </tr>

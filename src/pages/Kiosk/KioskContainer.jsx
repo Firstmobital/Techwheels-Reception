@@ -57,9 +57,11 @@ export default function KioskContainer() {
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [walkinData, setWalkinData] = useState(DEFAULT_STATE);
+  const [repeatFlowAction, setRepeatFlowAction] = useState(null);
 
   const resetFlow = useCallback(() => {
     setWalkinData(DEFAULT_STATE);
+    setRepeatFlowAction(null);
     setErrorMessage('');
     setSaving(false);
     setStep(KIOSK_STEPS.WELCOME);
@@ -118,6 +120,7 @@ export default function KioskContainer() {
 
             console.assert(!returningCustomer, '[KIOSK TEST][NEW] Repeat screen should not appear for new customer.');
             logKioskTest('NEW', 'Repeat screen skipped for new customer.', { mobile });
+            setRepeatFlowAction(null);
             setStep(KIOSK_STEPS.MODEL_SELECTION);
           }}
         />
@@ -170,12 +173,35 @@ export default function KioskContainer() {
                 token: created.token_number,
                 walkinId: created.id
               });
+              setRepeatFlowAction(null);
               setStep(KIOSK_STEPS.TOKEN);
             } catch (error) {
               setErrorMessage(error?.message || 'Unable to create walk-in. Please try again.');
             } finally {
               setSaving(false);
             }
+          }}
+          onChangeSalesperson={() => {
+            const repeatData = walkinData.returningCustomer;
+            if (!repeatData) return;
+
+            const selectedFuelTypes = normalizeFuelSelection(repeatData.fuel_type);
+            const selectedPurpose = repeatData.purpose || repeatData.last_purpose || walkinData.purpose;
+
+            setErrorMessage('');
+            setWalkinData((prev) => ({
+              ...prev,
+              purpose: selectedPurpose,
+              selectedCarId: repeatData.car_id || '',
+              selectedCarName: repeatData.last_model || '',
+              fuelTypes: selectedFuelTypes,
+              selectedLocationId: repeatData.location_id || '',
+              selectedLocationName: '',
+              salespersonId: '',
+              salespersonName: ''
+            }));
+            setRepeatFlowAction('change_salesperson');
+            setStep(KIOSK_STEPS.SALESPERSON_SELECTION);
           }}
           onChooseDifferentPurpose={() => {
             setErrorMessage('');
@@ -193,6 +219,7 @@ export default function KioskContainer() {
               tokenNumber: '',
               returningCustomer: null
             }));
+            setRepeatFlowAction(null);
 
             logKioskTest('REPEAT', 'Customer chose different purpose. Restarted normal flow.', {
               mobile: walkinData.mobileNumber
@@ -243,18 +270,34 @@ export default function KioskContainer() {
           selectedLocationId={walkinData.selectedLocationId}
           selectedSalespersonId={walkinData.salespersonId}
           submitting={saving}
-          onBack={() => setStep(KIOSK_STEPS.FUEL_SELECTION)}
+          onBack={() =>
+            setStep(
+              repeatFlowAction === 'change_salesperson'
+                ? KIOSK_STEPS.REPEAT_CUSTOMER
+                : KIOSK_STEPS.FUEL_SELECTION
+            )
+          }
           onNext={async ({ salespersonId, salespersonName, locationId, locationName }) => {
             setErrorMessage('');
             setSaving(true);
             try {
+              const repeatData = walkinData.returningCustomer;
+              const isRepeatReassignment = repeatFlowAction === 'change_salesperson' && Boolean(repeatData);
+              const selectedPurpose = isRepeatReassignment
+                ? repeatData.purpose || repeatData.last_purpose || walkinData.purpose
+                : walkinData.purpose;
+              const selectedCarId = isRepeatReassignment ? repeatData.car_id : walkinData.selectedCarId;
+              const selectedFuelTypes = isRepeatReassignment
+                ? normalizeFuelSelection(repeatData.fuel_type)
+                : walkinData.fuelTypes;
+
               const created = await createWalkIn({
                 customer_name: walkinData.customerName,
                 mobile_number: walkinData.mobileNumber,
-                purpose: walkinData.purpose,
-                car_id: walkinData.selectedCarId,
-                fuel_type: walkinData.fuelTypes,
-                fuel_types: walkinData.fuelTypes,
+                purpose: selectedPurpose,
+                car_id: selectedCarId,
+                fuel_type: selectedFuelTypes,
+                fuel_types: selectedFuelTypes,
                 salesperson_id: salespersonId,
                 location_id: locationId
               });
@@ -264,6 +307,9 @@ export default function KioskContainer() {
 
               setWalkinData((prev) => ({
                 ...prev,
+                purpose: selectedPurpose,
+                selectedCarId: selectedCarId || '',
+                fuelTypes: selectedFuelTypes,
                 selectedLocationId: locationId,
                 selectedLocationName: locationName,
                 salespersonId,
@@ -277,6 +323,7 @@ export default function KioskContainer() {
                 token: created.token_number,
                 walkinId: created.id
               });
+              setRepeatFlowAction(null);
               setStep(KIOSK_STEPS.TOKEN);
             } catch (error) {
               setErrorMessage(error?.message || 'Unable to create walk-in. Please try again.');
@@ -294,7 +341,7 @@ export default function KioskContainer() {
         onDone={resetFlow}
       />
     );
-  }, [saving, step, walkinData]);
+  }, [repeatFlowAction, saving, step, walkinData]);
 
   return (
     <div className="kiosk-grid mx-auto w-full max-w-[600px]">

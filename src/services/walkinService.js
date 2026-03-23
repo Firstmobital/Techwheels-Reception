@@ -355,6 +355,7 @@ export async function detectReturningCustomer(mobile) {
     purpose: data.purpose || null,
     car_id: data.car_id || null,
     fuel_type: previousFuelType,
+    location_id: data.location_id || null,
     salesperson_id: data.salesperson_id || null
   };
 }
