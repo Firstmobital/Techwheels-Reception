@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import KioskContainer from './pages/Kiosk/KioskContainer';
-import ReceptionDashboard from './pages/Reception/ReceptionDashboard';
+import ReportsView from './pages/Reception/ReportsView';
 import IVREntryScreen from './pages/Reception/IVREntryScreen';
 import GreenFormQueue from './pages/Reception/GreenFormQueue';
 import LoginPage from './pages/LoginPage';
@@ -73,7 +73,7 @@ export default function App() {
 
       <main className={activeInterface === 'kiosk' ? 'kiosk-fullscreen' : 'reception-shell'}>
         {activeInterface === 'kiosk' ? <KioskContainer /> : null}
-        {activeInterface === 'dashboard' ? <ReceptionDashboard /> : null}
+        {activeInterface === 'dashboard' ? <ReportsView /> : null}
         {activeInterface === 'ivr-entry' ? <IVREntryScreen /> : null}
         {activeInterface === 'green-form' ? <GreenFormQueue /> : null}
       </main>
