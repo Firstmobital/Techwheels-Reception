@@ -71,11 +71,13 @@ export async function submitOptyId(source_type, id, opty_id) {
 
   // Route to appropriate table:
   // - walkin: showroom_walkins
-  // - ivr: ai_leads (promoted interested rows from ivr_leads)
+  // - ivr: ivr_leads (interested rows now remain source-true in ivr_leads)
   // - ai: ai_leads (direct AI/chatbot leads)
   const tableName = normalizedSourceType === 'walkin'
     ? WALKINS_TABLE
-    : 'ai_leads';
+    : normalizedSourceType === 'ivr'
+      ? IVR_LEADS_TABLE
+      : 'ai_leads';
 
   const { data, error } = await supabase
     .from(tableName)
@@ -112,9 +114,8 @@ export async function getTodayGreenFormStats() {
       .gte('opty_submitted_at', startIso)
       .lt('opty_submitted_at', endIso),
     supabase
-      .from('ai_leads')
+      .from(IVR_LEADS_TABLE)
       .select('id', { count: 'exact', head: true })
-      .eq('lead_source', 'IVR')
       .eq('opty_status', 'submitted')
       .gte('opty_submitted_at', startIso)
       .lt('opty_submitted_at', endIso),

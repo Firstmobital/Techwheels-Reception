@@ -1,5 +1,6 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { createIVRLead } from '../../services/ivrService';
+import { getCurrentUserContext } from '../../services/authService';
 import {
   getAvailableCars,
   getLocations,
@@ -10,6 +11,7 @@ import { supabase } from '../../services/supabaseClient';
 const IVR_LEADS_TABLE = 'ivr_leads';
 const EMPLOYEES_TABLE = 'employees';
 const LOCATIONS_TABLE = 'locations';
+const BRANCH_MAPPING_ERROR = 'Branch is not mapped for this login.';
 
 const STATUS = {
   PENDING: 'pending',
@@ -106,6 +108,21 @@ function getDisplayName(person) {
   const first = person.first_name?.trim() || '';
   const last = person.last_name?.trim() || '';
   return `${first} ${last}`.trim() || null;
+}
+
+function getBestSalespersonLabel(row) {
+  const matchedName = getDisplayName(row?.matchedSalesperson);
+  if (matchedName) return matchedName;
+
+  const directLabel = String(
+    row?.salesperson_name || row?.dbLead?.salesperson_name || ''
+  ).trim();
+  if (directLabel && directLabel !== '—') return directLabel;
+
+  const salespersonId = row?.dbLead?.salesperson_id || row?.salesperson_id || row?.matchedSalespersonId;
+  if (salespersonId) return `Advisor #${salespersonId}`;
+
+  return null;
 }
 
 function getDateRange(filter) {
@@ -260,12 +277,14 @@ function DetailsDrawer({ dbLead, recordingUrl, onClose }) {
 
 // ─── All Entries: Inline Edit Row ─────────────────────────────────────────────
 
-async function fetchIVREntries(dateFilter) {
+async function fetchIVREntries(dateFilter, { isAdmin, locationId }) {
+  if (!isAdmin && !locationId) throw new Error(BRANCH_MAPPING_ERROR);
   let query = supabase
     .from(IVR_LEADS_TABLE)
     .select('id, customer_name, mobile_number, model_name, fuel_type, salesperson_id, location_id, remarks, conversation_summary, transcript, transcription_status, transcription_error, review_status, call_datetime, created_at, updated_at')
     .order('created_at', { ascending: false })
     .range(0, 9999);
+  if (!isAdmin) query = query.eq('location_id', locationId);
   const range = getDateRange(dateFilter);
   if (range) query = query.gte('created_at', range.start.toISOString()).lt('created_at', range.end.toISOString());
   const { data, error } = await query;
@@ -294,10 +313,9 @@ async function updateIVREntry(id, payload) {
   return data;
 }
 
-async function promoteIVRLeadToAI(ivrLeadId, payload) {
-  const aiLeadPayload = {
+async function markIVRLeadInterested(ivrLeadId, payload) {
+  const basePayload = {
     customer_name: payload.customer_name,
-    mobile_number: payload.mobile_number,
     model_name: payload.model_name,
     fuel_type: payload.fuel_type,
     salesperson_id: payload.salesperson_id || null,
@@ -305,17 +323,24 @@ async function promoteIVRLeadToAI(ivrLeadId, payload) {
     remarks: payload.remarks,
     conversation_summary: payload.conversation_summary,
     call_datetime: payload.call_datetime,
-    lead_source: 'IVR',
-    lead_disposition: 'active',
+    review_status: 'interested',
+    reviewed_at: new Date().toISOString(),
     opty_status: 'pending',
-    greenform_requested: false,
-    assigned_at: payload.salesperson_id ? new Date().toISOString() : null,
   };
-  const { data: aiLead, error: aiError } = await supabase.from('ai_leads').insert(aiLeadPayload).select('id').single();
-  if (aiError) throw aiError;
-  const { data: updated, error: updateError } = await supabase.from(IVR_LEADS_TABLE).update({ review_status: 'interested', reviewed_at: new Date().toISOString(), final_ai_lead_id: aiLead.id, updated_at: new Date().toISOString() }).eq('id', ivrLeadId).select().single();
-  if (updateError) throw updateError;
-  return { aiLead, updatedIVRLead: updated };
+
+  // greenform_requested is optional on ivr_leads in some DBs.
+  try {
+    return await updateIVREntry(ivrLeadId, {
+      ...basePayload,
+      greenform_requested: true,
+    });
+  } catch (error) {
+    const message = String(error?.message || '').toLowerCase();
+    if (message.includes('greenform_requested') && message.includes('column')) {
+      return updateIVREntry(ivrLeadId, basePayload);
+    }
+    throw error;
+  }
 }
 
 async function fetchEmployeesByMobile(rawPhones) {
@@ -333,7 +358,7 @@ async function fetchEmployeesByMobile(rawPhones) {
   return map;
 }
 
-function AllEntriesRow({ entry, cars, locations, onSaved }) {
+function AllEntriesRow({ entry, cars, locations, onSaved, isAdmin, currentLocationId }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({});
   const [salespersons, setSalespersons] = useState([]);
@@ -341,6 +366,10 @@ function AllEntriesRow({ entry, cars, locations, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [rowError, setRowError] = useState('');
   const [showTranscript, setShowTranscript] = useState(false);
+  const effectiveLocationId = !isAdmin ? (currentLocationId || null) : (draft.location_id || null);
+  const branchOptions = isAdmin
+    ? locations
+    : locations.filter(loc => String(loc.id) === String(currentLocationId));
   const callDateDisplay = formatCallDate(entry.call_datetime);
   const { label: txLabel, color: txColor } = normalizeTranscriptionStatus(entry);
   const { label: statusLabel, color: statusColor } = normalizeOptyStatus(entry);
@@ -355,7 +384,14 @@ function AllEntriesRow({ entry, cars, locations, onSaved }) {
   }, [draft.location_id, editing]);
 
   const handleEdit = () => {
-    setDraft({ customer_name: entry.customer_name || '', model_name: entry.model_name || '', fuel_type: entry.fuel_type || '', location_id: entry.location_id || '', salesperson_id: entry.salesperson_id || '', remarks: entry.remarks || '' });
+    setDraft({
+      customer_name: entry.customer_name || '',
+      model_name: entry.model_name || '',
+      fuel_type: entry.fuel_type || '',
+      location_id: !isAdmin ? (currentLocationId || '') : (entry.location_id || ''),
+      salesperson_id: entry.salesperson_id || '',
+      remarks: entry.remarks || ''
+    });
     setRowError('');
     setEditing(true);
   };
@@ -363,7 +399,8 @@ function AllEntriesRow({ entry, cars, locations, onSaved }) {
   const handleSave = async () => {
     setSaving(true); setRowError('');
     try {
-      await updateIVREntry(entry.id, { customer_name: draft.customer_name?.trim() || null, model_name: draft.model_name || null, fuel_type: draft.fuel_type || null, location_id: draft.location_id || null, salesperson_id: draft.salesperson_id || null, remarks: draft.remarks?.trim() || null });
+      if (!isAdmin && !currentLocationId) throw new Error(BRANCH_MAPPING_ERROR);
+      await updateIVREntry(entry.id, { customer_name: draft.customer_name?.trim() || null, model_name: draft.model_name || null, fuel_type: draft.fuel_type || null, location_id: effectiveLocationId, salesperson_id: draft.salesperson_id || null, remarks: draft.remarks?.trim() || null });
       setEditing(false); onSaved();
     } catch (err) { setRowError(err?.message || 'Save failed.'); }
     finally { setSaving(false); }
@@ -378,7 +415,7 @@ function AllEntriesRow({ entry, cars, locations, onSaved }) {
         <td className="px-3 py-2 text-sm text-slate-700 font-mono">{entry.mobile_number}</td>
         <td className="px-3 py-2"><select className="kiosk-select !min-h-[32px] !py-1 !text-sm" value={draft.model_name} onChange={e => setD('model_name', e.target.value)}><option value="">Optional</option>{cars.map(car => <option key={car.id} value={car.name}>{car.name}</option>)}</select></td>
         <td className="px-3 py-2"><select className="kiosk-select !min-h-[32px] !py-1 !text-sm" value={draft.fuel_type} onChange={e => setD('fuel_type', e.target.value)}><option value="">Optional</option>{FUEL_OPTIONS.map(f => <option key={f.code} value={f.code}>{f.label}</option>)}</select></td>
-        <td className="px-3 py-2"><select className="kiosk-select !min-h-[32px] !py-1 !text-sm" value={draft.location_id} onChange={e => setD('location_id', e.target.value)}><option value="">Select branch</option>{locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name || `Branch #${loc.id}`}</option>)}</select></td>
+        <td className="px-3 py-2"><select className="kiosk-select !min-h-[32px] !py-1 !text-sm" value={draft.location_id} onChange={e => setD('location_id', e.target.value)} disabled={!isAdmin}><option value="">Select branch</option>{branchOptions.map(loc => <option key={loc.id} value={loc.id}>{loc.name || `Branch #${loc.id}`}</option>)}</select></td>
         <td className="px-3 py-2"><select className="kiosk-select !min-h-[32px] !py-1 !text-sm" value={draft.salesperson_id} onChange={e => setD('salesperson_id', e.target.value)} disabled={loadingSP}><option value="">{loadingSP ? 'Loading…' : 'Select advisor'}</option>{salespersons.map(sp => <option key={sp.id} value={sp.id}>{getDisplayName(sp)}</option>)}</select></td>
         <td className="px-3 py-2"><input type="text" className="kiosk-input !min-h-[32px] !py-1 !text-sm w-full" placeholder="Remarks" value={draft.remarks} onChange={e => setD('remarks', e.target.value)} /></td>
         <td className="px-3 py-2 text-xs"><span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${txColor}`}>{txLabel}</span>{entry.transcript && <button type="button" onClick={() => setShowTranscript(true)} className="ml-1 text-blue-500 underline text-[10px]">Transcript</button>}</td>
@@ -422,7 +459,7 @@ function AllEntriesRow({ entry, cars, locations, onSaved }) {
   );
 }
 
-function AllEntriesTab({ cars, locations }) {
+function AllEntriesTab({ cars, locations, isAdmin, currentLocationId }) {
   const [dateFilter, setDateFilter] = useState('today');
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -430,10 +467,10 @@ function AllEntriesTab({ cars, locations }) {
   const [search, setSearch] = useState('');
   const load = useCallback(async () => {
     setLoading(true); setLoadError('');
-    try { setEntries(await fetchIVREntries(dateFilter)); }
+    try { setEntries(await fetchIVREntries(dateFilter, { isAdmin, locationId: currentLocationId })); }
     catch (err) { setLoadError(err?.message || 'Failed to load entries.'); }
     finally { setLoading(false); }
-  }, [dateFilter]);
+  }, [dateFilter, isAdmin, currentLocationId]);
   useEffect(() => { load(); }, [load]);
   const filtered = entries.filter(e => {
     if (!search.trim()) return true;
@@ -475,7 +512,7 @@ function AllEntriesTab({ cars, locations }) {
                 <th className="px-3 py-2.5 text-xs font-semibold text-slate-500 text-right">Action</th>
               </tr>
             </thead>
-            <tbody>{filtered.map(entry => <AllEntriesRow key={entry.id} entry={entry} cars={cars} locations={locations} onSaved={load} />)}</tbody>
+            <tbody>{filtered.map(entry => <AllEntriesRow key={entry.id} entry={entry} cars={cars} locations={locations} onSaved={load} isAdmin={isAdmin} currentLocationId={currentLocationId} />)}</tbody>
           </table>
         </div>
       )}
@@ -527,9 +564,13 @@ function DetailsPreviewCell({ dbLead, recordingUrl, rowStatus, savedSummary, err
 
 // ─── Entry Tab IVR Row ────────────────────────────────────────────────────────
 
-function IVRRow({ row, cars, locations, loadingCars, loadingLocations, onMarkUninterested, onSaveInterested, onFocusNext, interestedBtnRef, isFocused }) {
+function IVRRow({ row, cars, locations, loadingCars, loadingLocations, onMarkUninterested, onSaveInterested, onFocusNext, interestedBtnRef, isFocused, isAdmin, currentLocationId }) {
   const dbLead = row.dbLead || null;
   const recordingUrl = dbLead?.call_recording_url || row.callRecordingUrl || null;
+  const normalizedCurrentLocationId = currentLocationId !== null && currentLocationId !== undefined ? String(currentLocationId) : '';
+  const branchOptions = isAdmin
+    ? locations
+    : locations.filter(loc => String(loc.id) === normalizedCurrentLocationId);
   const [data, setData] = useState(() => ({
     ...BLANK_ROW_DATA,
     customerName: dbLead?.customer_name || '',
@@ -559,6 +600,11 @@ function IVRRow({ row, cars, locations, loadingCars, loadingLocations, onMarkUni
   }, [data.locationId]);
 
   const set = (field, value) => setData(prev => ({ ...prev, [field]: value }));
+  useEffect(() => {
+    if (!isAdmin && normalizedCurrentLocationId && data.locationId !== normalizedCurrentLocationId) {
+      setData(prev => ({ ...prev, locationId: normalizedCurrentLocationId }));
+    }
+  }, [isAdmin, normalizedCurrentLocationId, data.locationId]);
   const isDone = row.status === STATUS.SAVED || row.status === STATUS.UNINTERESTED;
   const isSaving = row.status === STATUS.SAVING;
 
@@ -679,9 +725,9 @@ function IVRRow({ row, cars, locations, loadingCars, loadingLocations, onMarkUni
               </label>
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
                 Branch
-                <select className="kiosk-select !min-h-[36px] !py-1.5 !text-sm" value={data.locationId} onChange={e => set('locationId', e.target.value)} disabled={loadingLocations}>
+                <select className="kiosk-select !min-h-[36px] !py-1.5 !text-sm" value={data.locationId} onChange={e => set('locationId', e.target.value)} disabled={loadingLocations || !isAdmin}>
                   <option value="">{loadingLocations ? 'Loading…' : 'Select branch'}</option>
-                  {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name || `Branch #${loc.id}`}</option>)}
+                  {branchOptions.map(loc => <option key={loc.id} value={loc.id}>{loc.name || `Branch #${loc.id}`}</option>)}
                 </select>
               </label>
               <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
@@ -726,9 +772,24 @@ export default function IVREntryScreen() {
   const [focusedRowId, setFocusedRowId] = useState(null);
   const [cars, setCars] = useState([]);
   const [locations, setLocations] = useState([]);
+  const [currentUserContext, setCurrentUserContext] = useState(null);
+  const [loadingUserContext, setLoadingUserContext] = useState(true);
   const [loadingCars, setLoadingCars] = useState(true);
   const [loadingLocations, setLoadingLocations] = useState(true);
   const interestedBtnRefs = useRef({});
+  const currentLocationId = currentUserContext?.location_id ?? null;
+  const currentRole = String(currentUserContext?.role || '').toLowerCase();
+  const isAdmin = currentRole === 'admin';
+  const branchMappingError = !loadingUserContext && !isAdmin && !currentLocationId ? BRANCH_MAPPING_ERROR : '';
+
+  useEffect(() => {
+    let mounted = true;
+    getCurrentUserContext()
+      .then(ctx => { if (mounted) setCurrentUserContext(ctx); })
+      .catch(() => { if (mounted) setCurrentUserContext(null); })
+      .finally(() => { if (mounted) setLoadingUserContext(false); });
+    return () => { mounted = false; };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -743,12 +804,13 @@ export default function IVREntryScreen() {
   }, []);
 
   async function batchInsertIVRLeads(parseRowsWithMatches) {
+    if (!isAdmin && !currentLocationId) throw new Error(BRANCH_MAPPING_ERROR);
     const leadsToInsert = parseRowsWithMatches.map(({ mobile, callDate, connectedToRaw, matchedSalesperson, callRecordingUrl }) => ({
       mobile_number: mobile,
       call_datetime: callDate ? new Date(callDate).toISOString() : null,
       connected_to_raw: connectedToRaw,
       salesperson_id: matchedSalesperson?.id || null,
-      location_id: matchedSalesperson?.location_id || null,
+      location_id: !isAdmin ? currentLocationId : (matchedSalesperson?.location_id || null),
       call_recording_url: callRecordingUrl || null,
       review_status: 'pending',
     }));
@@ -763,6 +825,7 @@ export default function IVREntryScreen() {
     const isZip = file.name.endsWith('.zip');
     const isCsv = file.name.endsWith('.csv');
     if (!isZip && !isCsv) { setFileError('Please upload the ZIP file downloaded from your IVR portal, or a CSV file.'); e.target.value = ''; return; }
+    if (!isAdmin && !currentLocationId) { setFileError(BRANCH_MAPPING_ERROR); e.target.value = ''; return; }
     setFileError(''); setImporting(true);
     try {
       let text;
@@ -797,7 +860,7 @@ export default function IVREntryScreen() {
         return {
           id: String(lead.id), ivrLeadsId: lead.id, index, mobile: parsed.mobile, callDate: parsed.callDate, connectedToRaw: parsed.connectedToRaw, callRecordingUrl: lead.call_recording_url || null,
           dbLead: { id: lead.id, call_recording_url: lead.call_recording_url || null, customer_name: lead.customer_name || null, model_name: lead.model_name || null, fuel_type: lead.fuel_type || null, conversation_summary: lead.conversation_summary || null, remarks: lead.remarks || null, transcript: lead.transcript || null, transcription_status: lead.transcription_status || null },
-          matchedSalesperson: matched, matchedSalespersonId: matched?.id ? String(matched.id) : '', matchedLocationId: matched?.location_id ? String(matched.location_id) : '',
+          matchedSalesperson: matched, matchedSalespersonId: matched?.id ? String(matched.id) : '', matchedLocationId: !isAdmin ? String(currentLocationId) : (matched?.location_id ? String(matched.location_id) : ''),
           status: STATUS.PENDING, savedSummary: null, errorMessage: null,
         };
       });
@@ -869,25 +932,27 @@ export default function IVREntryScreen() {
     if (!row) return;
     setRowStatus(rowId, STATUS.SAVING);
     try {
+      if (!isAdmin && !currentLocationId) throw new Error(BRANCH_MAPPING_ERROR);
+      const effectiveLocationId = !isAdmin ? currentLocationId : (data.locationId || null);
       let ivrLeadId = row.ivrLeadsId;
       if (!ivrLeadId) {
-        const savedLead = await createIVRLead({ customer_name: data.customerName.trim() || null, mobile_number: row.mobile, model_name: data.modelName || null, fuel_type: data.fuelType || null, salesperson_id: data.salespersonId || null, location_id: data.locationId || null, remarks: data.remarks.trim() || null, transcript: data.transcript || null, conversation_summary: data.conversationSummary?.trim() || null, call_datetime: row.callDate ? new Date(row.callDate).toISOString() : null, call_recording_url: row.callRecordingUrl || null });
+        const savedLead = await createIVRLead({ customer_name: data.customerName.trim() || null, mobile_number: row.mobile, model_name: data.modelName || null, fuel_type: data.fuelType || null, salesperson_id: data.salespersonId || null, location_id: effectiveLocationId, remarks: data.remarks.trim() || null, transcript: data.transcript || null, conversation_summary: data.conversationSummary?.trim() || null, call_datetime: row.callDate ? new Date(row.callDate).toISOString() : null, call_recording_url: row.callRecordingUrl || null });
         if (row.callRecordingUrl && savedLead?.id) { supabase.functions.invoke('transcribe-ivr-call', { body: { leadId: savedLead.id } }).catch(() => {}); }
         ivrLeadId = savedLead.id;
       } else {
         const { data: existing } = await supabase.from(IVR_LEADS_TABLE).select('final_ai_lead_id').eq('id', ivrLeadId).single();
-        if (existing?.final_ai_lead_id) { setRowStatus(rowId, STATUS.SAVED, { savedSummary: 'Already promoted to AI' }); return; }
+        if (existing?.final_ai_lead_id) { setRowStatus(rowId, STATUS.SAVED, { savedSummary: 'Already handled in legacy AI flow' }); return; }
       }
-      const promotionPayload = { customer_name: data.customerName?.trim() || row.dbLead?.customer_name || null, mobile_number: row.mobile, model_name: data.modelName || row.dbLead?.model_name || null, fuel_type: data.fuelType || row.dbLead?.fuel_type || null, salesperson_id: data.salespersonId || null, location_id: data.locationId || null, remarks: data.remarks?.trim() || row.dbLead?.remarks || null, conversation_summary: data.conversationSummary?.trim() || row.dbLead?.conversation_summary || null, call_datetime: row.callDate ? new Date(row.callDate).toISOString() : null };
-      await promoteIVRLeadToAI(ivrLeadId, promotionPayload);
+      const promotionPayload = { customer_name: data.customerName?.trim() || row.dbLead?.customer_name || null, mobile_number: row.mobile, model_name: data.modelName || row.dbLead?.model_name || null, fuel_type: data.fuelType || row.dbLead?.fuel_type || null, salesperson_id: data.salespersonId || null, location_id: effectiveLocationId, remarks: data.remarks?.trim() || row.dbLead?.remarks || null, conversation_summary: data.conversationSummary?.trim() || row.dbLead?.conversation_summary || null, call_datetime: row.callDate ? new Date(row.callDate).toISOString() : null };
+      await markIVRLeadInterested(ivrLeadId, promotionPayload);
       const parts = [];
       if (data.customerName?.trim()) parts.push(data.customerName.trim());
       if (data.modelName) parts.push(data.modelName);
       if (data.fuelType) parts.push(FUEL_OPTIONS.find(f => f.code === data.fuelType)?.label || data.fuelType);
       if (data.remarks?.trim()) parts.push(`"${data.remarks.trim()}"`);
-      setRowStatus(rowId, STATUS.SAVED, { savedSummary: parts.join(' · ') || 'Promoted to AI' });
+      setRowStatus(rowId, STATUS.SAVED, { savedSummary: parts.join(' · ') || 'Marked interested' });
     } catch (error) { setRowStatus(rowId, STATUS.ERROR, { errorMessage: error?.message || 'Save failed.' }); }
-  }, [rows, setRowStatus]);
+  }, [rows, setRowStatus, isAdmin, currentLocationId]);
 
   const counts = rows.reduce((acc, r) => { if (r.status === STATUS.SAVED) acc.saved++; else if (r.status === STATUS.UNINTERESTED) acc.uninterested++; else acc.pending++; return acc; }, { saved: 0, uninterested: 0, pending: 0 });
   const matchedCount = rows.filter(r => r.matchedSalesperson).length;
@@ -902,6 +967,33 @@ export default function IVREntryScreen() {
     if (statusFilter === 'matched') return !!r.matchedSalesperson;
     return true;
   }) : rows;
+
+  const assignmentSummary = useMemo(() => {
+    const bySalesperson = new Map();
+    let unassigned = 0;
+
+    for (const row of visibleRows) {
+      const label = getBestSalespersonLabel(row);
+      if (!label) {
+        unassigned += 1;
+        continue;
+      }
+      bySalesperson.set(label, (bySalesperson.get(label) || 0) + 1);
+    }
+
+    const assignedCounts = [...bySalesperson.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => {
+        if (b.count !== a.count) return b.count - a.count;
+        return a.name.localeCompare(b.name);
+      });
+
+    return {
+      assignedCounts,
+      unassigned,
+      total: visibleRows.length,
+    };
+  }, [visibleRows]);
 
   const statCards = [
     { key: null, label: 'Total', value: rows.length, color: 'bg-slate-100 text-slate-700', activeColor: 'bg-slate-800 text-white' },
@@ -947,6 +1039,7 @@ export default function IVREntryScreen() {
               <input ref={fileInputRef} type="file" accept=".zip,.csv" className="hidden" onChange={handleFileChange} />
             </div>
             {fileError && <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{fileError}</div>}
+            {branchMappingError && <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{branchMappingError}</div>}
             <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800">Upload the <strong>ZIP file</strong> directly from your IVR portal. Leads will be saved and transcription will start automatically.</div>
           </div>
         ) : (
@@ -977,6 +1070,27 @@ export default function IVREntryScreen() {
               <span><kbd className="bg-white border border-slate-200 rounded px-1 font-mono text-[10px]">↑↓</kbd> dropdown</span>
               <span><kbd className="bg-white border border-slate-200 rounded px-1 font-mono text-[10px]">U</kbd> uninterested</span>
               <span><kbd className="bg-white border border-slate-200 rounded px-1 font-mono text-[10px]">Enter</kbd> on remarks saves</span>
+            </div>
+
+            <div className="flex justify-end">
+              <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 shadow-sm">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <p className="text-xs font-semibold text-slate-700">Live Assignment Summary</p>
+                  <span className="text-[11px] text-slate-500">{assignmentSummary.total}</span>
+                </div>
+                <div className="max-h-24 space-y-1 overflow-y-auto pr-1">
+                  {assignmentSummary.assignedCounts.map(item => (
+                    <div key={item.name} className="flex items-center justify-between gap-2 text-[11px] text-slate-700">
+                      <span className="truncate" title={item.name}>{item.name}</span>
+                      <span className="font-semibold text-slate-800">{item.count}</span>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between gap-2 text-[11px] text-slate-700 border-t border-slate-200 pt-1">
+                    <span>Unassigned</span>
+                    <span className="font-semibold text-slate-800">{assignmentSummary.unassigned}</span>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* #3: Clickable stat filter cards */}
@@ -1026,6 +1140,8 @@ export default function IVREntryScreen() {
                     locations={locations}
                     loadingCars={loadingCars}
                     loadingLocations={loadingLocations}
+                    isAdmin={isAdmin}
+                    currentLocationId={currentLocationId}
                     onMarkUninterested={handleMarkUninterested}
                     onSaveInterested={handleSaveInterested}
                     onFocusNext={() => focusNextPendingRow(row.id)}
@@ -1039,7 +1155,7 @@ export default function IVREntryScreen() {
         )
       )}
 
-      {activeTab === 'all' && <AllEntriesTab cars={cars} locations={locations} />}
+      {activeTab === 'all' && <AllEntriesTab cars={cars} locations={locations} isAdmin={isAdmin} currentLocationId={currentLocationId} />}
     </section>
   );
 }
