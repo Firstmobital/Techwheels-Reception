@@ -350,10 +350,13 @@ function aggregateRows(rows, {
 }) {
   const modelCounts = new Map();
   const fuelCounts  = new Map();
+  const modelFuelCounts = new Map();
   const spCounts    = new Map();
   const branchCounts = new Map();
   const purposeCounts = new Map();
   const reviewCounts = new Map();
+
+  const FUEL_LABEL = { PETROL: 'Petrol', DIESEL: 'Diesel', EV: 'EV', CNG: 'CNG' };
 
   rows.forEach(r => {
     const model   = getModel(r)   || 'Unknown';
@@ -369,8 +372,15 @@ function aggregateRows(rows, {
 
     if (fuels.length === 0) {
       fuelCounts.set('Unknown', (fuelCounts.get('Unknown') || 0) + 1);
+      const key = model === 'Unknown' ? 'Unknown' : model;
+      modelFuelCounts.set(key, (modelFuelCounts.get(key) || 0) + 1);
     } else {
-      fuels.forEach(f => fuelCounts.set(f, (fuelCounts.get(f) || 0) + 1));
+      fuels.forEach(f => {
+        fuelCounts.set(f, (fuelCounts.get(f) || 0) + 1);
+        const fLabel = FUEL_LABEL[f] || f;
+        const key = model === 'Unknown' ? `Unknown (${fLabel})` : `${model} ${fLabel}`;
+        modelFuelCounts.set(key, (modelFuelCounts.get(key) || 0) + 1);
+      });
     }
     if (purpose) purposeCounts.set(purpose, (purposeCounts.get(purpose) || 0) + 1);
     if (rs)      reviewCounts.set(rs, (reviewCounts.get(rs) || 0) + 1);
@@ -379,6 +389,7 @@ function aggregateRows(rows, {
   return {
     modelInterest:           normalizeCountEntries(modelCounts),
     fuelPreference:          normalizeCountEntries(fuelCounts),
+    modelFuelBreakdown:      normalizeCountEntries(modelFuelCounts),
     salespersonPerformance:  normalizeCountEntries(spCounts),
     branchBreakdown:         normalizeCountEntries(branchCounts),
     purposeBreakdown:        normalizeCountEntries(purposeCounts),
@@ -947,6 +958,7 @@ export default function ReportsView() {
       sub: `Walk-ins: ${totalW}  ·  IVR: ${totalI}`,
       modelInterest:          merge(walkinAgg.modelInterest, ivrAgg.modelInterest),
       fuelPreference:         merge(walkinAgg.fuelPreference, ivrAgg.fuelPreference),
+      modelFuelBreakdown:     merge(walkinAgg.modelFuelBreakdown, ivrAgg.modelFuelBreakdown),
       salespersonPerformance: merge(walkinAgg.salespersonPerformance, ivrAgg.salespersonPerformance),
       branchBreakdown:        merge(walkinAgg.branchBreakdown, ivrAgg.branchBreakdown),
       purposeBreakdown:       walkinAgg.purposeBreakdown,
@@ -1184,8 +1196,7 @@ export default function ReportsView() {
           {viewMode === 'summary' && (
             <div className="reports-charts-grid">
               <BarChart title="By branch" items={active.branchBreakdown ?? []} color="blue" />
-              <BarChart title="By model" items={active.modelInterest ?? []} color="purple" />
-              <BarChart title="By fuel type" items={active.fuelPreference ?? []} color="amber" />
+              <BarChart title="By model &amp; fuel" items={active.modelFuelBreakdown ?? []} color="purple" />
               <BarChart title="By salesperson" items={active.salespersonPerformance ?? []} color="coral" />
               {source !== 'ivr' && active.purposeBreakdown?.length > 0 && (
                 <BarChart title="By purpose (walk-ins)" items={active.purposeBreakdown} color="teal" />
