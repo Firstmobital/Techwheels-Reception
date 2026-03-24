@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { createIVRLead } from '../../services/ivrService';
+import { createIVRLead, createBatchDraftLeads, updateIVRLead } from '../../services/ivrService';
 import {
   getAvailableCars,
   getLocations,
@@ -636,7 +636,9 @@ function IVRRow({ row, cars, locations, loadingCars, loadingLocations, onMarkUni
 
   const aiBadge = () => {
     if (!recordingUrl) return <span className="text-slate-300 text-[10px]">No recording</span>;
-    const { label, color } = normalizeTranscriptionStatus(dbLead || {});
+    // Use row.transcription_status for draft leads, or dbLead.transcription_status for existing records
+    const transcriptionStatus = row.transcription_status || dbLead?.transcription_status;
+    const { label, color } = normalizeTranscriptionStatus({ transcription_status: transcriptionStatus });
     return (
       <div className="flex flex-col gap-1">
         <span className={`w-fit text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${color}`}>{label}</span>
@@ -787,6 +789,9 @@ export default function IVREntryScreen() {
   const [loadingCars, setLoadingCars] = useState(true);
   const [loadingLocations, setLoadingLocations] = useState(true);
   const interestedBtnRefs = useRef({});
+  // Transcription batch creation state
+  const [transcriptionStarted, setTranscriptionStarted] = useState(false);
+  const [batchingLeads, setBatchingLeads] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -883,7 +888,7 @@ export default function IVREntryScreen() {
     finally { setImporting(false); e.target.value = ''; }
   };
 
-  const handleReset = () => { setRows([]); setHasImported(false); setFileError(''); setStatusFilter(null); setFocusedRowId(null); interestedBtnRefs.current = {}; };
+  const handleReset = () => { setRows([]); setHasImported(false); setFileError(''); setStatusFilter(null); setFocusedRowId(null); setTranscriptionStarted(false); interestedBtnRefs.current = {}; };
 
   // No background DB sync needed — rows are inserted only when executive acts,
   // so there is no pre-existing DB record to poll for transcription updates.
@@ -900,6 +905,41 @@ export default function IVREntryScreen() {
       return currentRows;
     });
   }, []);
+
+  const handleStartTranscription = useCallback(async () => {
+    if (rows.length === 0 || transcriptionStarted || batchingLeads) return;
+
+    setBatchingLeads(true);
+    try {
+      // Extract minimal data from rows to create draft leads
+      const draftLeads = rows.map(row => ({
+        mobile: row.mobile,
+        callDate: row.callDate || null,
+        callRecordingUrl: row.callRecordingUrl || null,
+        locationId: row.matchedLocationId || null,
+        salespersonId: row.matchedSalesperson?.id || null,
+      }));
+
+      // Create batch draft leads (inserts into DB and invokes transcription)
+      const createdLeads = await createBatchDraftLeads(draftLeads);
+
+      // Map returned lead IDs back to rows by mobile number
+      const leadMap = new Map(createdLeads.map(lead => [lead.mobile_number, lead.id]));
+      setRows(prev => prev.map(row => {
+        const leadId = leadMap.get(row.mobile);
+        return leadId ? { ...row, ivrLeadsId: leadId, transcription_status: row.callRecordingUrl ? 'pending' : null } : row;
+      }));
+
+      setTranscriptionStarted(true);
+      // Show toast-like feedback via console for now; you can add a proper toast library later
+      console.log(`✓ Started transcription for ${createdLeads.length} leads`);
+    } catch (err) {
+      console.error('Failed to start transcription batch:', err);
+      // Could show error toast here
+    } finally {
+      setBatchingLeads(false);
+    }
+  }, [rows, transcriptionStarted, batchingLeads]);
 
   const handleMarkUninterested = useCallback(async (rowId) => {
     const row = rows.find(r => r.id === rowId);
@@ -933,8 +973,19 @@ export default function IVREntryScreen() {
       const effectiveLocationId = data.locationId || row.matchedLocationId || null;
       let ivrLeadId = row.ivrLeadsId;
 
-      if (!ivrLeadId) {
-        // Insert into DB now — this is the first time this row is saved
+      if (ivrLeadId) {
+        // Draft lead already exists (from batch creation) — just update it
+        await updateIVRLead(ivrLeadId, {
+          customer_name: data.customerName?.trim() || null,
+          model_name: data.modelName || null,
+          fuel_type: data.fuelType || null,
+          salesperson_id: data.salespersonId || null,
+          location_id: effectiveLocationId,
+          remarks: data.remarks?.trim() || null,
+          markInterested: true, // flag to set review_status = 'interested'
+        });
+      } else {
+        // Insert into DB now — this is the first time this row is saved (no batch creation happened)
         const savedLead = await createIVRLead({
           customer_name: data.customerName?.trim() || null,
           mobile_number: row.mobile,
@@ -947,12 +998,9 @@ export default function IVREntryScreen() {
           conversation_summary: data.conversationSummary?.trim() || null,
           call_datetime: row.callDate ? new Date(row.callDate).toISOString() : null,
           call_recording_url: row.callRecordingUrl || null,
+          autoInvoke: true, // invoke transcription if recording exists
         });
         ivrLeadId = savedLead.id;
-        // Trigger transcription now that we have a DB record
-        if (row.callRecordingUrl && ivrLeadId) {
-          supabase.functions.invoke('transcribe-ivr-call', { body: { leadId: ivrLeadId } }).catch(() => {});
-        }
       }
 
       const promotionPayload = {
@@ -1176,6 +1224,22 @@ export default function IVREntryScreen() {
                 Showing {visibleRows.length} of {rows.length} leads ·{' '}
                 <button type="button" onClick={() => setStatusFilter(null)} className="text-blue-500 underline">Clear filter</button>
               </p>
+            )}
+
+            {!transcriptionStarted && rows.length > 0 && (
+              <div className="flex items-center justify-between gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
+                <p className="text-sm text-blue-800">
+                  <span className="font-semibold">{rows.filter(r => r.callRecordingUrl).length} leads have recordings</span> ready for transcription
+                </p>
+                <button
+                  type="button"
+                  className="btn bg-blue-600 text-white hover:bg-blue-700 text-sm px-4 h-9 rounded-lg disabled:opacity-50"
+                  onClick={handleStartTranscription}
+                  disabled={batchingLeads}
+                >
+                  {batchingLeads ? 'Starting…' : '▶ Preview & Start Transcription'}
+                </button>
+              </div>
             )}
 
             <div className="overflow-x-auto rounded-2xl border border-slate-200">
