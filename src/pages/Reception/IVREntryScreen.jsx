@@ -355,6 +355,23 @@ async function fetchEmployeesByMobile(rawPhones) {
   return map;
 }
 
+async function checkDuplicatePhones(mobileNumbers) {
+  if (!mobileNumbers.length) return new Map();
+  const { data, error } = await supabase
+    .from(IVR_LEADS_TABLE)
+    .select('mobile_number, created_at')
+    .in('mobile_number', mobileNumbers)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  const map = new Map();
+  for (const row of data || []) {
+    if (!map.has(row.mobile_number)) {
+      map.set(row.mobile_number, row.created_at);
+    }
+  }
+  return map;
+}
+
 function AllEntriesRow({ entry, cars, locations, onSaved }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({});
@@ -597,6 +614,7 @@ function IVRRow({ row, cars, locations, loadingCars, loadingLocations, onMarkUni
     row.status === STATUS.UNINTERESTED ? 'border-l-4 border-l-red-300 bg-red-50/30 opacity-55' :
     row.status === STATUS.ERROR ? 'border-l-4 border-l-yellow-400 bg-yellow-50/40' :
     isFocused ? 'border-l-4 border-l-blue-500 bg-blue-50/20' :
+    row.isDuplicate ? 'border-l-4 border-l-amber-400 bg-amber-50/30' :
     'border-l-4 border-l-transparent bg-white';
 
   const handleSave = useCallback(async () => { await onSaveInterested(row.id, data); onFocusNext(); }, [row.id, data, onSaveInterested, onFocusNext]);
@@ -631,7 +649,17 @@ function IVRRow({ row, cars, locations, loadingCars, loadingLocations, onMarkUni
     <tbody>
       <tr className={`border-b border-slate-100 transition-colors ${rowClass}`} onKeyDown={handleRowKeyDown}>
         <td className="px-3 py-2 text-xs text-slate-400 font-mono w-8">{row.index + 1}</td>
-        <td className="px-3 py-2 text-sm font-semibold text-slate-800 w-36">{row.mobile}</td>
+        <td className="px-3 py-2 text-sm font-semibold text-slate-800 w-36">
+          {row.mobile}
+          {row.isDuplicate && (
+            <div className="mt-1 flex items-center gap-1">
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold border border-amber-200">⚠ Already exists</span>
+            </div>
+          )}
+          {row.isDuplicate && row.duplicateSince && (
+            <div className="text-[10px] text-amber-700 mt-0.5">Last entry: {formatCallDate(row.duplicateSince)}</div>
+          )}
+        </td>
         <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap w-28">{row.callDate || <span className="text-slate-300">—</span>}</td>
         <td className="px-3 py-2 text-xs w-36">{row.matchedSalesperson ? <span className="text-emerald-700 font-medium">✓ {getDisplayName(row.matchedSalesperson)}</span> : <span className="text-slate-300">No match</span>}</td>
         <td className="px-3 py-2 text-xs w-32">{aiBadge()}</td>
@@ -813,24 +841,36 @@ export default function IVREntryScreen() {
       if (parsed.length === 0) { setFileError('No valid customer numbers found. Make sure the file has a CustomerNumber column.'); setImporting(false); e.target.value = ''; return; }
 
       const connectedPhones = parsed.map(r => r.connectedToRaw).filter(Boolean);
-      const empByMobile = await fetchEmployeesByMobile(connectedPhones);
-      const parseRowsWithMatches = parsed.map(({ mobile, callDate, connectedToRaw, callRecordingUrl }) => {
+      const allMobiles = parsed.map(r => r.mobile).filter(Boolean);
+
+      // Run employee match and duplicate check in parallel
+      const [empByMobile, duplicateMap] = await Promise.all([
+        fetchEmployeesByMobile(connectedPhones),
+        checkDuplicatePhones(allMobiles),
+      ]);
+
+      const newRows = parsed.map(({ mobile, callDate, connectedToRaw, callRecordingUrl }, index) => {
         const connectedNormalized = normalizePhone(connectedToRaw);
         const matchedSalesperson = connectedNormalized ? empByMobile.get(connectedNormalized) || null : null;
-        return { mobile, callDate, connectedToRaw, callRecordingUrl: callRecordingUrl || null, matchedSalesperson };
-      });
-
-      const insertedLeads = await batchInsertIVRLeads(parseRowsWithMatches);
-      if (insertedLeads.length === 0) { setFileError('Failed to insert leads. Please try again.'); setImporting(false); e.target.value = ''; return; }
-
-      const newRows = insertedLeads.map((lead, index) => {
-        const parsed = parseRowsWithMatches[index];
-        const matched = parsed.matchedSalesperson;
+        const isDuplicate = duplicateMap.has(mobile);
+        const duplicateSince = isDuplicate ? duplicateMap.get(mobile) : null;
         return {
-          id: String(lead.id), ivrLeadsId: lead.id, index, mobile: parsed.mobile, callDate: parsed.callDate, connectedToRaw: parsed.connectedToRaw, callRecordingUrl: lead.call_recording_url || null,
-          dbLead: { id: lead.id, call_recording_url: lead.call_recording_url || null, customer_name: lead.customer_name || null, model_name: lead.model_name || null, fuel_type: lead.fuel_type || null, conversation_summary: lead.conversation_summary || null, remarks: lead.remarks || null, transcript: lead.transcript || null, transcription_status: lead.transcription_status || null },
-          matchedSalesperson: matched, matchedSalespersonId: matched?.id ? String(matched.id) : '', matchedLocationId: String(selectedUploadLocationId),
-          status: STATUS.PENDING, savedSummary: null, errorMessage: null,
+          id: `preview-${index}-${mobile}`,
+          ivrLeadsId: null, // Not saved yet — will be saved only when executive acts
+          index,
+          mobile,
+          callDate,
+          connectedToRaw,
+          callRecordingUrl: callRecordingUrl || null,
+          dbLead: null,
+          matchedSalesperson,
+          matchedSalespersonId: matchedSalesperson?.id ? String(matchedSalesperson.id) : '',
+          matchedLocationId: String(selectedUploadLocationId),
+          isDuplicate,
+          duplicateSince,
+          status: STATUS.PENDING,
+          savedSummary: null,
+          errorMessage: null,
         };
       });
 
@@ -839,39 +879,14 @@ export default function IVREntryScreen() {
         const firstId = newRows[0]?.id;
         if (firstId) { interestedBtnRefs.current[firstId]?.focus(); setFocusedRowId(firstId); }
       }, 100);
-
-      insertedLeads.forEach(lead => {
-        if (lead.call_recording_url && lead.id) {
-          supabase.functions.invoke('transcribe-ivr-call', { body: { leadId: lead.id } }).catch((err) => { console.error(`Failed to trigger transcription for lead ${lead.id}:`, err); });
-        }
-      });
     } catch (err) { setFileError(err?.message || 'Failed to process file.'); }
     finally { setImporting(false); e.target.value = ''; }
   };
 
   const handleReset = () => { setRows([]); setHasImported(false); setFileError(''); setStatusFilter(null); setFocusedRowId(null); interestedBtnRefs.current = {}; };
 
-  useEffect(() => {
-    if (activeTab !== 'entry' || !hasImported || rows.length === 0) return;
-    const leadIds = rows.map(r => r.ivrLeadsId).filter(Boolean);
-    if (!leadIds.length) return;
-    let mounted = true;
-    const syncRowsFromDB = async () => {
-      const { data, error } = await supabase.from(IVR_LEADS_TABLE).select('id, call_recording_url, customer_name, model_name, fuel_type, conversation_summary, remarks, transcript, transcription_status').in('id', leadIds);
-      if (error) { console.error('Failed to sync IVR rows:', error); return; }
-      if (!mounted) return;
-      const byId = new Map((data || []).map(item => [item.id, item]));
-      setRows(prev => prev.map(r => {
-        if (!r.ivrLeadsId) return r;
-        const dbLead = byId.get(r.ivrLeadsId);
-        if (!dbLead) return r;
-        return { ...r, dbLead, callRecordingUrl: r.callRecordingUrl || dbLead.call_recording_url || null };
-      }));
-    };
-    syncRowsFromDB();
-    const timer = setInterval(syncRowsFromDB, 8000);
-    return () => { mounted = false; clearInterval(timer); };
-  }, [activeTab, hasImported, rows.length]);
+  // No background DB sync needed — rows are inserted only when executive acts,
+  // so there is no pre-existing DB record to poll for transcription updates.
 
   const setRowStatus = useCallback((rowId, status, extra = {}) => {
     setRows(prev => prev.map(r => r.id === rowId ? { ...r, status, ...extra } : r));
@@ -890,10 +905,24 @@ export default function IVREntryScreen() {
     const row = rows.find(r => r.id === rowId);
     if (!row) return;
     setRowStatus(rowId, STATUS.UNINTERESTED);
-    if (row.ivrLeadsId) {
-      try { await supabase.from(IVR_LEADS_TABLE).update({ review_status: 'uninterested', reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', row.ivrLeadsId); }
-      catch (err) { console.error(`Failed to mark lead ${row.ivrLeadsId} as uninterested:`, err); }
-    }
+    try {
+      if (row.ivrLeadsId) {
+        // Already in DB (edge case), just update status
+        await supabase.from(IVR_LEADS_TABLE).update({ review_status: 'uninterested', reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', row.ivrLeadsId);
+      } else {
+        // Not in DB yet — insert as uninterested so there's a record
+        await createIVRLead({
+          mobile_number: row.mobile,
+          call_datetime: row.callDate ? new Date(row.callDate).toISOString() : null,
+          salesperson_id: row.matchedSalesperson?.id || null,
+          location_id: row.matchedLocationId || null,
+          call_recording_url: row.callRecordingUrl || null,
+          customer_name: null, model_name: null, fuel_type: null, remarks: null, transcript: null, conversation_summary: null,
+        }).then(saved => {
+          supabase.from(IVR_LEADS_TABLE).update({ review_status: 'uninterested', reviewed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', saved.id).then(() => {});
+        });
+      }
+    } catch (err) { console.error(`Failed to save uninterested lead for ${row.mobile}:`, err); }
   }, [rows, setRowStatus]);
 
   const handleSaveInterested = useCallback(async (rowId, data) => {
@@ -901,18 +930,44 @@ export default function IVREntryScreen() {
     if (!row) return;
     setRowStatus(rowId, STATUS.SAVING);
     try {
-      const effectiveLocationId = data.locationId || null;
+      const effectiveLocationId = data.locationId || row.matchedLocationId || null;
       let ivrLeadId = row.ivrLeadsId;
+
       if (!ivrLeadId) {
-        const savedLead = await createIVRLead({ customer_name: data.customerName.trim() || null, mobile_number: row.mobile, model_name: data.modelName || null, fuel_type: data.fuelType || null, salesperson_id: data.salespersonId || null, location_id: effectiveLocationId, remarks: data.remarks.trim() || null, transcript: data.transcript || null, conversation_summary: data.conversationSummary?.trim() || null, call_datetime: row.callDate ? new Date(row.callDate).toISOString() : null, call_recording_url: row.callRecordingUrl || null });
-        if (row.callRecordingUrl && savedLead?.id) { supabase.functions.invoke('transcribe-ivr-call', { body: { leadId: savedLead.id } }).catch(() => {}); }
+        // Insert into DB now — this is the first time this row is saved
+        const savedLead = await createIVRLead({
+          customer_name: data.customerName?.trim() || null,
+          mobile_number: row.mobile,
+          model_name: data.modelName || null,
+          fuel_type: data.fuelType || null,
+          salesperson_id: data.salespersonId || null,
+          location_id: effectiveLocationId,
+          remarks: data.remarks?.trim() || null,
+          transcript: data.transcript || null,
+          conversation_summary: data.conversationSummary?.trim() || null,
+          call_datetime: row.callDate ? new Date(row.callDate).toISOString() : null,
+          call_recording_url: row.callRecordingUrl || null,
+        });
         ivrLeadId = savedLead.id;
-      } else {
-        const { data: existing } = await supabase.from(IVR_LEADS_TABLE).select('final_ai_lead_id').eq('id', ivrLeadId).single();
-        if (existing?.final_ai_lead_id) { setRowStatus(rowId, STATUS.SAVED, { savedSummary: 'Already handled in legacy AI flow' }); return; }
+        // Trigger transcription now that we have a DB record
+        if (row.callRecordingUrl && ivrLeadId) {
+          supabase.functions.invoke('transcribe-ivr-call', { body: { leadId: ivrLeadId } }).catch(() => {});
+        }
       }
-      const promotionPayload = { customer_name: data.customerName?.trim() || row.dbLead?.customer_name || null, mobile_number: row.mobile, model_name: data.modelName || row.dbLead?.model_name || null, fuel_type: data.fuelType || row.dbLead?.fuel_type || null, salesperson_id: data.salespersonId || null, location_id: effectiveLocationId, remarks: data.remarks?.trim() || row.dbLead?.remarks || null, conversation_summary: data.conversationSummary?.trim() || row.dbLead?.conversation_summary || null, call_datetime: row.callDate ? new Date(row.callDate).toISOString() : null };
+
+      const promotionPayload = {
+        customer_name: data.customerName?.trim() || null,
+        mobile_number: row.mobile,
+        model_name: data.modelName || null,
+        fuel_type: data.fuelType || null,
+        salesperson_id: data.salespersonId || null,
+        location_id: effectiveLocationId,
+        remarks: data.remarks?.trim() || null,
+        conversation_summary: data.conversationSummary?.trim() || null,
+        call_datetime: row.callDate ? new Date(row.callDate).toISOString() : null,
+      };
       await markIVRLeadInterested(ivrLeadId, promotionPayload);
+
       const parts = [];
       if (data.customerName?.trim()) parts.push(data.customerName.trim());
       if (data.modelName) parts.push(data.modelName);
@@ -924,6 +979,7 @@ export default function IVREntryScreen() {
 
   const counts = rows.reduce((acc, r) => { if (r.status === STATUS.SAVED) acc.saved++; else if (r.status === STATUS.UNINTERESTED) acc.uninterested++; else acc.pending++; return acc; }, { saved: 0, uninterested: 0, pending: 0 });
   const matchedCount = rows.filter(r => r.matchedSalesperson).length;
+  const duplicateCount = rows.filter(r => r.isDuplicate).length;
   const reviewedCount = counts.saved + counts.uninterested;
   const progressPct = rows.length > 0 ? Math.round((reviewedCount / rows.length) * 100) : 0;
 
@@ -933,6 +989,7 @@ export default function IVREntryScreen() {
     if (statusFilter === 'saved') return r.status === STATUS.SAVED;
     if (statusFilter === 'uninterested') return r.status === STATUS.UNINTERESTED;
     if (statusFilter === 'matched') return !!r.matchedSalesperson;
+    if (statusFilter === 'duplicate') return !!r.isDuplicate;
     return true;
   }) : rows;
 
@@ -966,6 +1023,7 @@ export default function IVREntryScreen() {
   const statCards = [
     { key: null, label: 'Total', value: rows.length, color: 'bg-slate-100 text-slate-700', activeColor: 'bg-slate-800 text-white' },
     { key: 'matched', label: 'Matched', value: matchedCount, color: 'bg-emerald-50 text-emerald-700', activeColor: 'bg-emerald-700 text-white' },
+    { key: 'duplicate', label: 'Duplicates', value: duplicateCount, color: 'bg-amber-50 text-amber-700', activeColor: 'bg-amber-500 text-white' },
     { key: 'pending', label: 'Pending', value: counts.pending, color: 'bg-orange-50 text-orange-600', activeColor: 'bg-orange-500 text-white' },
     { key: 'saved', label: 'Saved', value: counts.saved, color: 'bg-green-50 text-green-700', activeColor: 'bg-green-600 text-white' },
     { key: 'uninterested', label: 'Uninterested', value: counts.uninterested, color: 'bg-red-50 text-red-600', activeColor: 'bg-red-600 text-white' },
@@ -1030,7 +1088,7 @@ export default function IVREntryScreen() {
               <input ref={fileInputRef} type="file" accept=".zip,.csv" className="hidden" onChange={handleFileChange} />
             </div>
             {fileError && <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{fileError}</div>}
-            <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800">Upload the <strong>ZIP file</strong> directly from your IVR portal. Leads will be saved and transcription will start automatically.</div>
+            <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800">Upload the <strong>ZIP file</strong> directly from your IVR portal. Leads are <strong>only saved</strong> when you mark them Interested or Uninterested — untouched rows are discarded.</div>
           </div>
         ) : (
           <div className="space-y-3">
@@ -1050,6 +1108,18 @@ export default function IVREntryScreen() {
             {rows.length > 0 && reviewedCount === rows.length && (
               <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5 text-sm text-emerald-700 font-semibold">
                 ✓ All {rows.length} leads reviewed!
+              </div>
+            )}
+
+            {/* Duplicate warning banner */}
+            {duplicateCount > 0 && (
+              <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5">
+                <span className="text-amber-600 text-base">⚠</span>
+                <div className="text-sm text-amber-800">
+                  <span className="font-semibold">{duplicateCount} phone number{duplicateCount > 1 ? 's' : ''} already exist{duplicateCount === 1 ? 's' : ''} in the IVR leads table.</span>
+                  {' '}These rows are highlighted in amber. You can still mark them Interested if it's a fresh call.
+                  {' '}<button type="button" onClick={() => setStatusFilter('duplicate')} className="underline font-semibold hover:text-amber-900">View duplicates</button>
+                </div>
               </div>
             )}
 
