@@ -67,6 +67,7 @@ export async function getIVRLeadsByRange({ startIso, endIso }) {
       'id, customer_name, mobile_number, model_name, fuel_type, salesperson_id, location_id, ' +
       'remarks, review_status, opty_status, opty_id, call_datetime, created_at'
     )
+    .eq('review_status', 'interested')
     .gte('created_at', startIso)
     .lt('created_at', endIso)
     .order('created_at', { ascending: false });

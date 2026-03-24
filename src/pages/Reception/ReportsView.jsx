@@ -110,7 +110,7 @@ function WalkinTable({ rows, branches, salespersons }) {
             <tr>
               <th>Date</th><th>Time</th><th>Customer</th><th>Mobile</th>
               <th>Branch</th><th>Model</th><th>Fuel</th><th>Salesperson</th>
-              <th>Purpose</th><th>Status</th><th>Opty</th><th>Token</th>
+              <th>Purpose</th><th>Opty ID</th><th>Opty</th><th>Token</th>
             </tr>
           </thead>
           <tbody>
@@ -130,11 +130,7 @@ function WalkinTable({ rows, branches, salespersons }) {
                   <td>{fuelLabel(row.fuel_types ?? row.fuel_type)}</td>
                   <td>{tv(spName(row)) || 'Unassigned'}</td>
                   <td>{tv(row.purpose)}</td>
-                  <td>
-                    <span className={`reports-badge reports-badge--${row.status === 'assigned' ? 'green' : 'gray'}`}>
-                      {tv(row.status)}
-                    </span>
-                  </td>
+                  <td>{tv(row.opty_id)}</td>
                   <td>
                     {optySubmitted
                       ? <span className="reports-badge reports-badge--blue">{tv(row.opty_id)}</span>
@@ -193,7 +189,7 @@ function IVRTable({ rows, branches, salespersons }) {
             <tr>
               <th>Date</th><th>Time</th><th>Customer</th><th>Mobile</th>
               <th>Branch</th><th>Model</th><th>Fuel</th><th>Salesperson</th>
-              <th>Review status</th><th>Opty status</th>
+              <th>Opty ID</th><th>Opty status</th>
             </tr>
           </thead>
           <tbody>
@@ -201,8 +197,6 @@ function IVRTable({ rows, branches, salespersons }) {
               <tr><td colSpan={10} className="reports-empty-cell">No IVR records for this period.</td></tr>
             )}
             {filtered.map(row => {
-              const rs = row.review_status || 'pending';
-              const rsBadge = rs === 'interested' ? 'green' : rs === 'uninterested' ? 'red' : 'amber';
               return (
                 <tr key={row.id}>
                   <td>{fmtDate(row.created_at)}</td>
@@ -213,7 +207,7 @@ function IVRTable({ rows, branches, salespersons }) {
                   <td>{tv(row.model_name)}</td>
                   <td>{fuelLabel(row.fuel_type)}</td>
                   <td>{tv(spName(row)) || 'Unassigned'}</td>
-                  <td><span className={`reports-badge reports-badge--${rsBadge}`}>{rs}</span></td>
+                  <td>{tv(row.opty_id)}</td>
                   <td><span className="reports-badge reports-badge--gray">{tv(row.opty_status) || 'pending'}</span></td>
                 </tr>
               );
@@ -236,7 +230,7 @@ function CombinedTable({ walkinRows, ivrRows, branches, salespersons }) {
       _sp: spName(r),
       _model: tv(r?.car?.name),
       _fuel: fuelLabel(r.fuel_types ?? r.fuel_type),
-      _status: r.status,
+      _optyId: r.opty_id,
     }));
     const iv = ivrRows.map(r => ({
       ...r, _source: 'ivr',
@@ -244,7 +238,7 @@ function CombinedTable({ walkinRows, ivrRows, branches, salespersons }) {
       _sp: spName(r),
       _model: tv(r.model_name),
       _fuel: fuelLabel(r.fuel_type),
-      _status: r.review_status || 'pending',
+      _optyId: r.opty_id,
     }));
     return [...w, ...iv].sort((a, b) =>
       new Date(b.created_at) - new Date(a.created_at)
@@ -275,7 +269,7 @@ function CombinedTable({ walkinRows, ivrRows, branches, salespersons }) {
             <tr>
               <th>Date</th><th>Time</th><th>Source</th><th>Customer</th>
               <th>Mobile</th><th>Branch</th><th>Model</th><th>Fuel</th>
-              <th>Salesperson</th><th>Status</th>
+              <th>Salesperson</th><th>Opty ID</th>
             </tr>
           </thead>
           <tbody>
@@ -297,12 +291,7 @@ function CombinedTable({ walkinRows, ivrRows, branches, salespersons }) {
                 <td>{row._model}</td>
                 <td>{row._fuel}</td>
                 <td>{tv(row._sp) || 'Unassigned'}</td>
-                <td>
-                  <span className={`reports-badge reports-badge--${
-                    row._status === 'assigned' || row._status === 'interested' ? 'green'
-                    : row._status === 'uninterested' ? 'red' : 'gray'
-                  }`}>{row._status}</span>
-                </td>
+                <td>{tv(row._optyId)}</td>
               </tr>
             ))}
           </tbody>
