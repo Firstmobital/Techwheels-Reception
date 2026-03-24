@@ -396,33 +396,10 @@ function aggregateRows(rows, {
 function computeConversionFromRows(walkinRows, ivrRows, conversionReport) {
   if (!conversionReport) return null;
 
-  // Re-use the convertedOptyIds set from the service result
-  // We reconstruct it from the pre-tagged rows in the full (unfiltered) service result.
-  // The service doesn't expose the set directly, so we derive it from agentPerformance
-  // totals — but the simplest approach is to tag from opty_id presence in the
-  // sourceBreakdown. Instead, we accept a convertedOptyIds set passed separately.
-  // Since conversionReport is computed server-side, we re-use the filtering approach:
-  // a row is "converted" if its opty_id is non-null AND appears in the bookings table.
-  // We can't re-query bookings here, so we tag rows using the same opty_id logic from
-  // the service: compare against allRows in conversionReport via opty_id lookup.
-
-  // Build a set of all opty_ids that are converted, from the original (unfiltered) service result.
-  // We expose this by checking any row in walkinRows/ivrRows that has opty_id.
-  // Since the service pre-computed conversionReport.sourceBreakdown.walkin.converted etc.
-  // those numbers are UNFILTERED. We need per-row conversion tags on the filtered rows.
-
-  // Strategy: the raw rows from walkinReport/ivrReport already have opty_id.
-  // We reconstruct the convertedOptyIds by fetching... but we can't re-query here.
-  // Better: store convertedOptyIds in the conversionReport returned from service.
-  // For now, tag a row as converted only if opty_id is truthy AND
-  // the conversionReport confirms it was converted. We do this via a lookup map
-  // built from the agentPerformance data — but that loses per-row info.
-  //
-  // ACTUAL FIX: We'll augment conversionReport to carry a convertedOptyIds Set.
-  // For now, use the heuristic: converted = opty_id is non-null.
-  // This matches the real behaviour since opty_id is only set when an opty is submitted.
-
-  const isConverted = (row) => Boolean(row.opty_id);
+  // Use the booking-match set returned by the service.
+  // A row is converted only if its opty_id appears in the booking table (crm_opty_id match).
+  const convertedOptyIds = conversionReport.convertedOptyIds || new Set();
+  const isConverted = (row) => Boolean(row.opty_id && convertedOptyIds.has(row.opty_id));
 
   const taggedWalkins = walkinRows.map(r => ({
     ...r,
@@ -1004,12 +981,6 @@ export default function ReportsView() {
     return computeConversionFromRows(wRows, iRows, conversionReport);
   }, [conversionReport, filteredWalkinRows, filteredIvrRows, source]);
 
-  const optyCount = useMemo(() => {
-    const w  = filteredWalkinRows.filter(r => String(r.opty_status || '').toLowerCase() === 'submitted').length;
-    const iv = filteredIvrRows.filter(r => String(r.opty_status || '').toLowerCase() === 'submitted').length;
-    return source === 'walkin' ? w : source === 'ivr' ? iv : w + iv;
-  }, [source, filteredWalkinRows, filteredIvrRows]);
-
   const pendingIVR = useMemo(() =>
     filteredIvrRows.filter(r => (r.review_status || 'pending') === 'pending').length,
   [filteredIvrRows]);
@@ -1170,9 +1141,9 @@ export default function ReportsView() {
               sub={active.sub}
             />
             <KpiCard
-              label="Opty submitted"
-              value={optyCount}
-              sub={`${active.total > 0 ? Math.round((optyCount / active.total) * 100) : 0}% conversion`}
+              label="Converted"
+              value={filteredConversionReport?.totalConverted ?? 0}
+              sub={`${filteredConversionReport?.convRate ?? '0.0'}% conversion rate`}
             />
             {source !== 'walkin' && (
               <KpiCard

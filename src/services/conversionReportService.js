@@ -265,5 +265,7 @@ export async function getConversionReport({
     dailyTrend,
     hourlyTrend,
     dateRange: { startIso, endIso },
+    // Exposed so ReportsView can correctly tag filtered rows without re-querying
+    convertedOptyIds,
   };
 }
