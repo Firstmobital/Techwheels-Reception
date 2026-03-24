@@ -1141,82 +1141,96 @@ export default function IVREntryScreen() {
         ) : (
           <div className="space-y-3">
 
-            {/* #5: Progress bar */}
-            {rows.length > 0 && reviewedCount < rows.length && (
-              <div className="flex items-center gap-3 bg-slate-50 rounded-xl px-4 py-2.5 border border-slate-200">
-                <span className="text-xs text-slate-500 whitespace-nowrap">
-                  Reviewed <span className="font-semibold text-slate-800">{reviewedCount}</span> of <span className="font-semibold text-slate-800">{rows.length}</span>
-                </span>
-                <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                  <div className="h-full bg-blue-500 rounded-full transition-all duration-500" style={{ width: `${progressPct}%` }} />
-                </div>
-                <span className="text-xs text-slate-400 whitespace-nowrap">{counts.pending} remaining</span>
-              </div>
-            )}
-            {rows.length > 0 && reviewedCount === rows.length && (
-              <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5 text-sm text-emerald-700 font-semibold">
-                ✓ All {rows.length} leads reviewed!
-              </div>
-            )}
+            {/* Two-column top area: left = upload bar + alerts + progress + stats, right = assignment card */}
+            <div className="flex gap-4 items-start">
 
-            {/* Duplicate warning banner */}
-            {duplicateCount > 0 && (
-              <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5">
-                <span className="text-amber-600 text-base">⚠</span>
-                <div className="text-sm text-amber-800">
-                  <span className="font-semibold">{duplicateCount} phone number{duplicateCount > 1 ? 's' : ''} already exist{duplicateCount === 1 ? 's' : ''} in the IVR leads table.</span>
-                  {' '}These rows are highlighted in amber. You can still mark them Interested if it's a fresh call.
-                  {' '}<button type="button" onClick={() => setStatusFilter('duplicate')} className="underline font-semibold hover:text-amber-900">View duplicates</button>
+              {/* Left column */}
+              <div className="flex-1 min-w-0 space-y-3">
+
+                {/* Upload / reset bar */}
+                <div className="flex items-center justify-between gap-3 bg-slate-50 rounded-xl px-4 py-2.5 border border-slate-200">
+                  <span className="text-sm text-slate-600">
+                    <span className="font-semibold text-slate-800">{rows.length} leads</span> loaded from file
+                  </span>
+                  <button type="button" className="btn border border-slate-300 text-slate-600 bg-white hover:bg-slate-50 text-sm px-4 h-9 rounded-xl" onClick={handleReset}>← Upload New File</button>
+                </div>
+
+                {/* Duplicate warning banner */}
+                {duplicateCount > 0 && (
+                  <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5">
+                    <span className="text-amber-600 text-base">⚠</span>
+                    <div className="text-sm text-amber-800">
+                      <span className="font-semibold">{duplicateCount} phone number{duplicateCount > 1 ? 's' : ''} already exist{duplicateCount === 1 ? 's' : ''} in the IVR leads table.</span>
+                      {' '}These rows are highlighted in amber. You can still mark them Interested if it's a fresh call.
+                      {' '}<button type="button" onClick={() => setStatusFilter('duplicate')} className="underline font-semibold hover:text-amber-900">View duplicates</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Progress bar */}
+                {rows.length > 0 && reviewedCount < rows.length && (
+                  <div className="flex items-center gap-3 bg-slate-50 rounded-xl px-4 py-2.5 border border-slate-200">
+                    <span className="text-xs text-slate-500 whitespace-nowrap">
+                      Reviewed <span className="font-semibold text-slate-800">{reviewedCount}</span> of <span className="font-semibold text-slate-800">{rows.length}</span>
+                    </span>
+                    <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                      <div className="h-full bg-blue-500 rounded-full transition-all duration-500" style={{ width: `${progressPct}%` }} />
+                    </div>
+                    <span className="text-xs text-slate-400 whitespace-nowrap">{counts.pending} remaining</span>
+                  </div>
+                )}
+                {rows.length > 0 && reviewedCount === rows.length && (
+                  <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5 text-sm text-emerald-700 font-semibold">
+                    ✓ All {rows.length} leads reviewed!
+                  </div>
+                )}
+
+                {/* Stat filter cards */}
+                <div className="flex flex-wrap gap-2">
+                  {statCards.map(card => {
+                    const isActive = statusFilter === card.key;
+                    return (
+                      <button key={String(card.key)} type="button"
+                        onClick={() => setStatusFilter(isActive ? null : card.key)}
+                        className={`px-3 py-1.5 rounded-xl text-sm font-semibold transition-all border ${isActive ? `${card.activeColor} border-transparent shadow-sm` : `${card.color} border-transparent hover:border-slate-200 hover:shadow-sm`}`}
+                        title={card.key ? `Filter by ${card.label}` : 'Show all'}>
+                        {card.label}: {card.value}{isActive && <span className="ml-1 opacity-70">✕</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+
+              </div>
+
+              {/* Right column: Assignment card */}
+              <div className="w-56 flex-shrink-0 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 shadow-sm">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <p className="text-xs font-semibold text-slate-700">Live Assignment</p>
+                  <span className="text-[11px] text-slate-500">{assignmentSummary.total}</span>
+                </div>
+                <div className="max-h-32 space-y-1 overflow-y-auto pr-1">
+                  {assignmentSummary.assignedCounts.map(item => (
+                    <div key={item.name} className="flex items-center justify-between gap-2 text-[11px] text-slate-700">
+                      <span className="truncate" title={item.name}>{item.name}</span>
+                      <span className="font-semibold text-blue-700 bg-blue-50 rounded px-1.5">{item.count}</span>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between gap-2 text-[11px] text-slate-700 border-t border-slate-200 pt-1">
+                    <span className="text-slate-500">Unassigned</span>
+                    <span className="font-semibold text-amber-700 bg-amber-50 rounded px-1.5">{assignmentSummary.unassigned}</span>
+                  </div>
                 </div>
               </div>
-            )}
 
-            {/* #6: Compact keyboard hints (no longer a full-width bar) */}
+            </div>
+
+            {/* Keyboard hints */}
             <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-400">
               <span><kbd className="bg-white border border-slate-200 rounded px-1 font-mono text-[10px]">Enter</kbd> next field</span>
               <span><kbd className="bg-white border border-slate-200 rounded px-1 font-mono text-[10px]">Tab</kbd> forward</span>
               <span><kbd className="bg-white border border-slate-200 rounded px-1 font-mono text-[10px]">↑↓</kbd> dropdown</span>
               <span><kbd className="bg-white border border-slate-200 rounded px-1 font-mono text-[10px]">U</kbd> uninterested</span>
               <span><kbd className="bg-white border border-slate-200 rounded px-1 font-mono text-[10px]">Enter</kbd> on remarks saves</span>
-            </div>
-
-            <div className="flex justify-end">
-              <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 shadow-sm">
-                <div className="mb-1.5 flex items-center justify-between">
-                  <p className="text-xs font-semibold text-slate-700">Live Assignment Summary</p>
-                  <span className="text-[11px] text-slate-500">{assignmentSummary.total}</span>
-                </div>
-                <div className="max-h-24 space-y-1 overflow-y-auto pr-1">
-                  {assignmentSummary.assignedCounts.map(item => (
-                    <div key={item.name} className="flex items-center justify-between gap-2 text-[11px] text-slate-700">
-                      <span className="truncate" title={item.name}>{item.name}</span>
-                      <span className="font-semibold text-slate-800">{item.count}</span>
-                    </div>
-                  ))}
-                  <div className="flex items-center justify-between gap-2 text-[11px] text-slate-700 border-t border-slate-200 pt-1">
-                    <span>Unassigned</span>
-                    <span className="font-semibold text-slate-800">{assignmentSummary.unassigned}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* #3: Clickable stat filter cards */}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap gap-2">
-                {statCards.map(card => {
-                  const isActive = statusFilter === card.key;
-                  return (
-                    <button key={String(card.key)} type="button"
-                      onClick={() => setStatusFilter(isActive ? null : card.key)}
-                      className={`px-3 py-1.5 rounded-xl text-sm font-semibold transition-all border ${isActive ? `${card.activeColor} border-transparent shadow-sm` : `${card.color} border-transparent hover:border-slate-200 hover:shadow-sm`}`}
-                      title={card.key ? `Filter by ${card.label}` : 'Show all'}>
-                      {card.label}: {card.value}{isActive && <span className="ml-1 opacity-70">✕</span>}
-                    </button>
-                  );
-                })}
-              </div>
-              <button type="button" className="btn border border-slate-300 text-slate-600 bg-white hover:bg-slate-50 text-sm px-4 h-10 rounded-xl" onClick={handleReset}>← Upload New File</button>
             </div>
 
             {statusFilter && (
@@ -1226,6 +1240,7 @@ export default function IVREntryScreen() {
               </p>
             )}
 
+            {/* Transcription bar — just above the table */}
             {!transcriptionStarted && rows.length > 0 && (
               <div className="flex items-center justify-between gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
                 <p className="text-sm text-blue-800">
