@@ -395,8 +395,10 @@ export default function ReportsView() {
   const [viewMode, setViewMode] = useState('summary'); // 'summary' | 'table'
 
   // Global dimension filters (applied to KPIs + charts + tables)
-  const [filterModel, setFilterModel] = useState('all');
-  const [filterFuel,  setFilterFuel]  = useState('all');
+  const [filterModel,  setFilterModel]  = useState('all');
+  const [filterFuel,   setFilterFuel]   = useState('all');
+  const [filterBranch, setFilterBranch] = useState('all');
+  const [filterSP,     setFilterSP]     = useState('all');
 
   const [walkinReport, setWalkinReport] = useState(null);
   const [ivrReport, setIvrReport] = useState(null);
@@ -424,7 +426,7 @@ export default function ReportsView() {
 
   useEffect(() => { load(); }, [load]);
 
-  // ── Build option lists for global model/fuel dropdowns ──────────────────
+  // ── Build option lists for global model/fuel/branch/SP dropdowns ──────────
   const allModelOptions = useMemo(() => {
     const models = new Set();
     (walkinReport?.rows || []).forEach(r => { const m = walkinModel(r); if (m) models.add(m); });
@@ -439,6 +441,20 @@ export default function ReportsView() {
     return [...fuels].sort();
   }, [walkinReport, ivrReport]);
 
+  const allBranchOptions = useMemo(() => {
+    const branches = new Set();
+    (walkinReport?.rows || []).forEach(r => { const b = (r?.location?.name || '').trim(); if (b) branches.add(b); });
+    (ivrReport?.rows    || []).forEach(r => { const b = (r?.location?.name || '').trim(); if (b) branches.add(b); });
+    return [...branches].sort();
+  }, [walkinReport, ivrReport]);
+
+  const allSPOptions = useMemo(() => {
+    const sps = new Set();
+    (walkinReport?.rows || []).forEach(r => { const s = spName(r); if (s) sps.add(s); });
+    (ivrReport?.rows    || []).forEach(r => { const s = spName(r); if (s) sps.add(s); });
+    return [...sps].sort();
+  }, [walkinReport, ivrReport]);
+
   // Friendly label for a fuel code in the dropdown
   const FUEL_DISPLAY = { PETROL: 'Petrol', DIESEL: 'Diesel', EV: 'EV', CNG: 'CNG' };
 
@@ -446,20 +462,24 @@ export default function ReportsView() {
   const filteredWalkinRows = useMemo(() => {
     if (!walkinReport) return [];
     return walkinReport.rows.filter(r => {
-      const modelMatch = filterModel === 'all' || walkinModel(r).toLowerCase() === filterModel.toLowerCase();
-      const fuelMatch  = filterFuel  === 'all' || walkinFuelCodes(r).includes(filterFuel.toUpperCase());
-      return modelMatch && fuelMatch;
+      const modelMatch  = filterModel  === 'all' || walkinModel(r).toLowerCase() === filterModel.toLowerCase();
+      const fuelMatch   = filterFuel   === 'all' || walkinFuelCodes(r).includes(filterFuel.toUpperCase());
+      const branchMatch = filterBranch === 'all' || (r?.location?.name || '').trim() === filterBranch;
+      const spMatch     = filterSP     === 'all' || spName(r) === filterSP;
+      return modelMatch && fuelMatch && branchMatch && spMatch;
     });
-  }, [walkinReport, filterModel, filterFuel]);
+  }, [walkinReport, filterModel, filterFuel, filterBranch, filterSP]);
 
   const filteredIvrRows = useMemo(() => {
     if (!ivrReport) return [];
     return ivrReport.rows.filter(r => {
-      const modelMatch = filterModel === 'all' || ivrModel(r).toLowerCase() === filterModel.toLowerCase();
-      const fuelMatch  = filterFuel  === 'all' || ivrFuelCode(r) === filterFuel.toUpperCase();
-      return modelMatch && fuelMatch;
+      const modelMatch  = filterModel  === 'all' || ivrModel(r).toLowerCase() === filterModel.toLowerCase();
+      const fuelMatch   = filterFuel   === 'all' || ivrFuelCode(r) === filterFuel.toUpperCase();
+      const branchMatch = filterBranch === 'all' || (r?.location?.name || '').trim() === filterBranch;
+      const spMatch     = filterSP     === 'all' || spName(r) === filterSP;
+      return modelMatch && fuelMatch && branchMatch && spMatch;
     });
-  }, [ivrReport, filterModel, filterFuel]);
+  }, [ivrReport, filterModel, filterFuel, filterBranch, filterSP]);
 
   // ── Re-aggregate breakdowns from filtered rows ───────────────────────────
   const walkinAgg = useMemo(() => aggregateRows(filteredWalkinRows, {
@@ -530,8 +550,6 @@ export default function ReportsView() {
   const allSPs      = useMemo(() => [...new Set([...walkinSPs, ...ivrSPs])].sort(), [walkinSPs, ivrSPs]);
 
   // ── KPI extras ───────────────────────────────────────────────────────────
-  const topModel = active?.modelInterest?.[0];
-  const topSP    = active?.salespersonPerformance?.find(s => s.label !== 'Unassigned') ?? active?.salespersonPerformance?.[0];
 
   const optyCount = useMemo(() => {
     const w  = filteredWalkinRows.filter(r => String(r.opty_status || '').toLowerCase() === 'submitted').length;
@@ -546,10 +564,12 @@ export default function ReportsView() {
   // Active filter label shown in the header
   const activeFilterLabel = useMemo(() => {
     const parts = [];
-    if (filterModel !== 'all') parts.push(filterModel);
-    if (filterFuel  !== 'all') parts.push(FUEL_DISPLAY[filterFuel] || filterFuel);
+    if (filterModel  !== 'all') parts.push(filterModel);
+    if (filterFuel   !== 'all') parts.push(FUEL_DISPLAY[filterFuel] || filterFuel);
+    if (filterBranch !== 'all') parts.push(filterBranch);
+    if (filterSP     !== 'all') parts.push(filterSP);
     return parts.length ? parts.join(' · ') : null;
-  }, [filterModel, filterFuel]);
+  }, [filterModel, filterFuel, filterBranch, filterSP]);
 
   return (
     <section className="panel reports-view">
@@ -620,7 +640,7 @@ export default function ReportsView() {
         </div>
       )}
 
-      {/* ── Global dimension filters: model + fuel ── */}
+      {/* ── Global dimension filters: model + fuel + branch + salesperson ── */}
       {!loading && active && (
         <div className="reports-dim-filters">
           <select
@@ -645,14 +665,36 @@ export default function ReportsView() {
             ))}
           </select>
 
+          <select
+            className="reports-select"
+            value={filterBranch}
+            onChange={e => setFilterBranch(e.target.value)}
+          >
+            <option value="all">All branches</option>
+            {allBranchOptions.map(b => (
+              <option key={b} value={b}>{b}</option>
+            ))}
+          </select>
+
+          <select
+            className="reports-select"
+            value={filterSP}
+            onChange={e => setFilterSP(e.target.value)}
+          >
+            <option value="all">All salespersons</option>
+            {allSPOptions.map(s => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+
           {activeFilterLabel && (
             <span className="reports-active-filter">
               {activeFilterLabel}
               <button
                 type="button"
                 className="reports-clear-filter"
-                onClick={() => { setFilterModel('all'); setFilterFuel('all'); }}
-                title="Clear filters"
+                onClick={() => { setFilterModel('all'); setFilterFuel('all'); setFilterBranch('all'); setFilterSP('all'); }}
+                title="Clear all filters"
               >
                 ✕
               </button>
@@ -687,16 +729,6 @@ export default function ReportsView() {
                 sub={pendingIVR > 0 ? 'needs action' : 'all clear'}
               />
             )}
-            <KpiCard
-              label="Top model"
-              value={topModel?.label || '—'}
-              sub={topModel ? `${topModel.count} enquirie${topModel.count !== 1 ? 's' : ''}` : null}
-            />
-            <KpiCard
-              label="Top salesperson"
-              value={topSP?.label || '—'}
-              sub={topSP ? `${topSP.count} assigned` : null}
-            />
           </div>
 
           {/* ── View toggle ── */}
