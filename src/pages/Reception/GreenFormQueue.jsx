@@ -29,6 +29,10 @@ function formatDate(value) {
   });
 }
 
+function normalizeFilterValue(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
 export default function GreenFormQueue() {
   const [rows, setRows] = useState([]);
   const [optyValues, setOptyValues] = useState({});
@@ -40,6 +44,8 @@ export default function GreenFormQueue() {
     pending_today: 0,
     uploaded_today: 0
   });
+  const [selectedBranches, setSelectedBranches] = useState([]);
+  const [selectedFuels, setSelectedFuels] = useState([]);
 
   useEffect(() => {
     let mounted = true;
@@ -78,6 +84,73 @@ export default function GreenFormQueue() {
   }, []);
 
   const hasRows = useMemo(() => rows.length > 0, [rows.length]);
+
+  const branchOptions = useMemo(() => {
+    const branchMap = new Map();
+    rows.forEach((row) => {
+      const label = String(row.location_name || '').trim();
+      if (!label) return;
+
+      const key = normalizeFilterValue(label);
+      if (!branchMap.has(key)) {
+        branchMap.set(key, label);
+      }
+    });
+
+    return Array.from(branchMap.entries())
+      .map(([key, label]) => ({ key, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [rows]);
+
+  const fuelOptions = useMemo(() => {
+    const fuelMap = new Map();
+    rows.forEach((row) => {
+      (row.fuel_types || []).forEach((fuel) => {
+        const label = String(fuel || '').trim();
+        if (!label) return;
+
+        const key = normalizeFilterValue(label);
+        if (!fuelMap.has(key)) {
+          fuelMap.set(key, label);
+        }
+      });
+    });
+
+    return Array.from(fuelMap.entries())
+      .map(([key, label]) => ({ key, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [rows]);
+
+  const filteredRows = useMemo(() => {
+    return rows.filter((row) => {
+      const branchKey = normalizeFilterValue(row.location_name);
+      const matchesBranch =
+        selectedBranches.length === 0 ||
+        (branchKey && selectedBranches.includes(branchKey));
+
+      const fuelKeys = (row.fuel_types || []).map((fuel) => normalizeFilterValue(fuel)).filter(Boolean);
+      const matchesFuel =
+        selectedFuels.length === 0 || fuelKeys.some((fuelKey) => selectedFuels.includes(fuelKey));
+
+      return matchesBranch && matchesFuel;
+    });
+  }, [rows, selectedBranches, selectedFuels]);
+
+  const toggleBranch = (branchKey) => {
+    setSelectedBranches((prev) =>
+      prev.includes(branchKey)
+        ? prev.filter((value) => value !== branchKey)
+        : [...prev, branchKey]
+    );
+  };
+
+  const toggleFuel = (fuelKey) => {
+    setSelectedFuels((prev) =>
+      prev.includes(fuelKey)
+        ? prev.filter((value) => value !== fuelKey)
+        : [...prev, fuelKey]
+    );
+  };
 
   const handleSubmit = async (row) => {
     const rowKey = getRowKey(row);
@@ -136,11 +209,67 @@ export default function GreenFormQueue() {
         </div>
       </div>
 
+      {!loading && hasRows ? (
+        <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <p className="m-0 text-sm font-semibold text-slate-700">
+            Showing {filteredRows.length} of {rows.length} leads
+          </p>
+
+          <div className="mt-2">
+            <p className="m-0 text-xs font-semibold uppercase tracking-wide text-slate-600">Branch</p>
+            <div className="reports-filter-chips mb-0 mt-2">
+              <button
+                type="button"
+                className={`reports-chip ${selectedBranches.length === 0 ? 'reports-chip--active' : ''}`}
+                onClick={() => setSelectedBranches([])}
+              >
+                All
+              </button>
+              {branchOptions.map((branch) => (
+                <button
+                  key={branch.key}
+                  type="button"
+                  className={`reports-chip ${selectedBranches.includes(branch.key) ? 'reports-chip--active' : ''}`}
+                  onClick={() => toggleBranch(branch.key)}
+                >
+                  {branch.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-2">
+            <p className="m-0 text-xs font-semibold uppercase tracking-wide text-slate-600">Fuel</p>
+            <div className="reports-filter-chips mb-0 mt-2">
+              <button
+                type="button"
+                className={`reports-chip ${selectedFuels.length === 0 ? 'reports-chip--active' : ''}`}
+                onClick={() => setSelectedFuels([])}
+              >
+                All
+              </button>
+              {fuelOptions.map((fuel) => (
+                <button
+                  key={fuel.key}
+                  type="button"
+                  className={`reports-chip ${selectedFuels.includes(fuel.key) ? 'reports-chip--active' : ''}`}
+                  onClick={() => toggleFuel(fuel.key)}
+                >
+                  {fuel.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {loading ? <p>Loading pending leads...</p> : null}
 
       {!loading && !hasRows ? <p>No pending leads.</p> : null}
 
-      {!loading && hasRows ? (
+      {!loading && hasRows && filteredRows.length === 0 ? <p>No matching leads for selected filters.</p> : null}
+
+      {!loading && hasRows && filteredRows.length > 0 ? (
         <div className="overflow-x-auto">
           <table className="walkin-table">
             <thead>
@@ -158,7 +287,7 @@ export default function GreenFormQueue() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => {
+              {filteredRows.map((row) => {
                 const rowKey = getRowKey(row);
                 const submitting = Boolean(submittingRows[rowKey]);
 
