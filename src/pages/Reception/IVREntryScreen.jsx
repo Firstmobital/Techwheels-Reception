@@ -638,11 +638,15 @@ function IVRRow({ row, cars, locations, loadingCars, loadingLocations, onMarkUni
     if (!recordingUrl) return <span className="text-slate-300 text-[10px]">No recording</span>;
     // Use row.transcription_status for draft leads, or dbLead.transcription_status for existing records
     const transcriptionStatus = row.transcription_status || dbLead?.transcription_status;
+    const transcriptionErr = row.transcription_error || dbLead?.transcription_error;
     const { label, color } = normalizeTranscriptionStatus({ transcription_status: transcriptionStatus });
     return (
       <div className="flex flex-col gap-1">
         <span className={`w-fit text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${color}`}>{label}</span>
         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold">Recording linked</span>
+        {transcriptionErr && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 font-semibold border border-red-200">{transcriptionErr}</span>
+        )}
       </div>
     );
   };
@@ -805,6 +809,41 @@ export default function IVREntryScreen() {
     return () => { mounted = false; };
   }, []);
 
+  // Poll for transcription status updates
+  useEffect(() => {
+    if (!transcriptionStarted || rows.length === 0) return;
+
+    const pollTranscriptionStatus = async () => {
+      const leadsWithIds = rows.filter(r => r.ivrLeadsId);
+      if (leadsWithIds.length === 0) return;
+
+      try {
+        const { data: statuses, error } = await supabase
+          .from(IVR_LEADS_TABLE)
+          .select('id, transcription_status, transcription_error')
+          .in('id', leadsWithIds.map(r => r.ivrLeadsId));
+
+        if (error || !statuses) return;
+
+        // Update rows with fetched transcription status
+        const statusMap = new Map(statuses.map(s => [s.id, { status: s.transcription_status, error: s.transcription_error }]));
+        setRows(prev => prev.map(row => 
+          row.ivrLeadsId && statusMap.has(row.ivrLeadsId) 
+            ? { ...row, transcription_status: statusMap.get(row.ivrLeadsId).status, transcription_error: statusMap.get(row.ivrLeadsId).error }
+            : row
+        ));
+      } catch (err) {
+        console.error('Failed to poll transcription status:', err);
+      }
+    };
+
+    // Poll immediately and then every 2 seconds
+    pollTranscriptionStatus();
+    const timer = setInterval(pollTranscriptionStatus, 2000);
+
+    return () => clearInterval(timer);
+  }, [transcriptionStarted, rows]);
+
   async function batchInsertIVRLeads(parseRowsWithMatches) {
     if (!selectedUploadLocationId) throw new Error(UPLOAD_BRANCH_REQUIRED_ERROR);
     const leadsToInsert = parseRowsWithMatches.map(({ mobile, callDate, connectedToRaw, matchedSalesperson, callRecordingUrl }) => ({
@@ -876,6 +915,8 @@ export default function IVREntryScreen() {
           status: STATUS.PENDING,
           savedSummary: null,
           errorMessage: null,
+          transcription_status: null,
+          transcription_error: null,
         };
       });
 
