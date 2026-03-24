@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getWalkinReports } from '../../services/walkinService';
 import { getIVRReports, getIVRLeadsByRange } from '../../services/ivrReportService';
+import { getConversionReport } from '../../services/conversionReportService';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -385,6 +386,300 @@ function aggregateRows(rows, {
   };
 }
 
+// ─── conversion report components ────────────────────────────────────────────
+
+function BusinessOutcomes({ data }) {
+  if (!data) return null;
+  const { totalLeads, totalConverted, totalLost, convRate, sourceBreakdown } = data;
+  const walkinRate = sourceBreakdown?.walkin?.rate ?? 0;
+  const ivrRate    = sourceBreakdown?.ivr?.rate    ?? 0;
+  const bestSource = walkinRate >= ivrRate ? 'Walk-in' : 'IVR';
+  const diff       = Math.abs(walkinRate - ivrRate);
+
+  return (
+    <div className="reports-card reports-card--full conv-section">
+      <h3 className="reports-card__title">Business outcomes</h3>
+      <div className="conv-outcomes-grid">
+        <div className="conv-outcome">
+          <p className="conv-outcome__label">Total leads</p>
+          <p className="conv-outcome__value">{totalLeads.toLocaleString()}</p>
+        </div>
+        <div className="conv-outcome">
+          <p className="conv-outcome__label">Converted</p>
+          <p className="conv-outcome__value conv-outcome__value--green">{totalConverted.toLocaleString()}</p>
+        </div>
+        <div className="conv-outcome">
+          <p className="conv-outcome__label">Conversion rate</p>
+          <p className="conv-outcome__value">{convRate}%</p>
+        </div>
+        <div className="conv-outcome">
+          <p className="conv-outcome__label">Lost / no opty</p>
+          <p className="conv-outcome__value conv-outcome__value--red">{totalLost.toLocaleString()}</p>
+        </div>
+      </div>
+
+      {/* Source breakdown */}
+      <div style={{ marginTop: '1.25rem' }}>
+        <p className="conv-sub-title">Source breakdown</p>
+        {[
+          { key: 'walkin', label: 'Walk-in', color: '#2563eb', d: sourceBreakdown?.walkin },
+          { key: 'ivr',    label: 'IVR / Call', color: '#d97706', d: sourceBreakdown?.ivr },
+        ].map(({ label, color, d }) => {
+          if (!d) return null;
+          const pct = totalLeads > 0 ? Math.round((d.total / totalLeads) * 100) : 0;
+          const barPct = (sourceBreakdown?.walkin?.total + sourceBreakdown?.ivr?.total) > 0
+            ? Math.round((d.total / (sourceBreakdown.walkin.total + sourceBreakdown.ivr.total)) * 100)
+            : 0;
+          return (
+            <div key={label} style={{ marginBottom: '0.9rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span style={{ fontWeight: 600, fontSize: '0.95rem' }}>{label}</span>
+                <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>{d.total.toLocaleString()} <span style={{ color: '#888', fontWeight: 400 }}>{pct}%</span></span>
+              </div>
+              <div className="reports-bar-track" style={{ height: 9 }}>
+                <div style={{ height: '100%', width: `${barPct}%`, background: color, borderRadius: 999, minWidth: d.total > 0 ? 3 : 0 }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: '0.78rem', color: '#666' }}>
+                <span>Conv: {d.converted} ({d.rate}%)</span>
+                <span>Lost: {d.lost}</span>
+              </div>
+            </div>
+          );
+        })}
+        {diff > 0 && (
+          <div className="conv-best-badge">
+            {bestSource} +{diff}pp over {bestSource === 'Walk-in' ? 'IVR' : 'Walk-in'}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AgentPerformanceTable({ data }) {
+  if (!data?.agentPerformance?.length) return (
+    <div className="reports-card reports-card--full conv-section">
+      <h3 className="reports-card__title">Agent performance</h3>
+      <p className="reports-empty">No agent data for this period.</p>
+    </div>
+  );
+
+  const rows = data.agentPerformance;
+  const maxRate = Math.max(...rows.map(r => r.rate), 1);
+
+  return (
+    <div className="reports-card reports-card--full conv-section">
+      <h3 className="reports-card__title">Agent performance</h3>
+      <div className="reports-table-wrap">
+        <table className="reports-table">
+          <thead>
+            <tr>
+              <th>Agent</th>
+              <th style={{ textAlign: 'right' }}>Leads</th>
+              <th style={{ textAlign: 'right' }}>Conv.</th>
+              <th>Rate</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => {
+              const rateColor = r.rate >= 25 ? '#16a34a' : r.rate >= 15 ? '#d97706' : '#dc2626';
+              return (
+                <tr key={r.agent}>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span className="conv-rank">{i + 1}</span>
+                      {r.agent}
+                    </div>
+                  </td>
+                  <td style={{ textAlign: 'right', fontWeight: 600 }}>{r.leads}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 600 }}>{r.converted}</td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div className="reports-bar-track" style={{ flex: 1, height: 6 }}>
+                        <div style={{ height: '100%', width: `${Math.round((r.rate / maxRate) * 100)}%`, background: rateColor, borderRadius: 999 }} />
+                      </div>
+                      <span style={{ color: rateColor, fontWeight: 700, fontSize: '0.82rem', minWidth: 36 }}>{r.rate}%</span>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function BranchConversionTable({ data }) {
+  if (!data?.branchConversion?.length) return (
+    <div className="reports-card reports-card--full conv-section">
+      <h3 className="reports-card__title">Branch conversion</h3>
+      <p className="reports-empty">No branch data for this period.</p>
+    </div>
+  );
+
+  const rows = data.branchConversion;
+
+  return (
+    <div className="reports-card reports-card--full conv-section">
+      <h3 className="reports-card__title">Branch conversion</h3>
+      <div className="reports-table-wrap">
+        <table className="reports-table">
+          <thead>
+            <tr>
+              <th>Branch</th>
+              <th style={{ textAlign: 'right' }}>Total</th>
+              <th style={{ textAlign: 'right' }}>Walk-ins</th>
+              <th style={{ textAlign: 'right' }}>IVR</th>
+              <th style={{ textAlign: 'right' }}>Converted</th>
+              <th style={{ textAlign: 'right' }}>Rate</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => {
+              const rateColor = r.rate >= 25 ? '#16a34a' : r.rate >= 15 ? '#d97706' : '#dc2626';
+              return (
+                <tr key={r.branch}>
+                  <td style={{ fontWeight: 600 }}>{r.branch}</td>
+                  <td style={{ textAlign: 'right' }}>{r.total}</td>
+                  <td style={{ textAlign: 'right' }}>{r.walkins}</td>
+                  <td style={{ textAlign: 'right' }}>{r.ivr}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 600 }}>{r.converted}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    <span style={{ color: rateColor, fontWeight: 700 }}>{r.rate}%</span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function DailyTrendChart({ data }) {
+  if (!data?.dailyTrend?.length) return (
+    <div className="reports-card reports-card--full conv-section">
+      <h3 className="reports-card__title">Daily lead trend</h3>
+      <p className="reports-empty">No daily data for this period.</p>
+    </div>
+  );
+
+  const rows = data.dailyTrend;
+  const maxVal = Math.max(...rows.map(r => r.total), 1);
+  const avg = rows.length > 0 ? (rows.reduce((s, r) => s + r.total, 0) / rows.length).toFixed(1) : 0;
+  const peak = [...rows].sort((a, b) => b.total - a.total)[0];
+  const lowest = [...rows].sort((a, b) => a.total - b.total)[0];
+  const today_ = new Date().toISOString().slice(0, 10);
+
+  function shortDate(iso) {
+    const d = new Date(`${iso}T00:00:00`);
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+
+  return (
+    <div className="reports-card reports-card--full conv-section">
+      <h3 className="reports-card__title">Daily lead trend</h3>
+      <div className="daily-chart">
+        {rows.map(r => {
+          const heightPct = Math.max(Math.round((r.total / maxVal) * 100), r.total > 0 ? 4 : 0);
+          const isToday = r.date === today_;
+          return (
+            <div key={r.date} className="daily-bar-wrap" title={`${shortDate(r.date)}: ${r.total} leads`}>
+              <div className="daily-bar-col">
+                <div
+                  className={`daily-bar${isToday ? ' daily-bar--today' : ''}`}
+                  style={{ height: `${heightPct}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="daily-axis">
+        <span>{rows[0] ? shortDate(rows[0].date) : ''}</span>
+        <span>{rows[rows.length - 1] ? shortDate(rows[rows.length - 1].date) : ''}</span>
+      </div>
+      <div className="daily-stats">
+        <span><span className="daily-stat-label">Daily avg</span> <strong>{avg}</strong></span>
+        {peak && <span><span className="daily-stat-label">Peak day</span> <strong>{shortDate(peak.date)} — {peak.total}</strong></span>}
+        {lowest && lowest.date !== peak?.date && <span><span className="daily-stat-label">Lowest</span> <strong>{shortDate(lowest.date)} — {lowest.total}</strong></span>}
+      </div>
+    </div>
+  );
+}
+
+function HourlyTrendChart({ data }) {
+  if (!data?.hourlyTrend) return null;
+
+  // Only show hours 7AM–7PM (7–19), trim empty ends
+  const slots = data.hourlyTrend.filter(h => h.hour >= 7 && h.hour <= 19);
+  const maxVal = Math.max(...slots.map(h => h.walkin + h.ivr), 1);
+
+  const CHART_H = 120;
+
+  function yFor(val) {
+    return CHART_H - Math.round((val / maxVal) * CHART_H);
+  }
+
+  // Build SVG polyline points
+  function pts(key) {
+    return slots.map((h, i) => {
+      const x = 40 + Math.round((i / (slots.length - 1)) * (600 - 40));
+      const y = 10 + yFor(h[key]);
+      return `${x},${y}`;
+    }).join(' ');
+  }
+
+  const walkinPts = pts('walkin');
+  const ivrPts    = pts('ivr');
+
+  return (
+    <div className="reports-card reports-card--full conv-section">
+      <h3 className="reports-card__title">Lead volume — hourly</h3>
+      <div className="hourly-legend">
+        <span className="hourly-dot hourly-dot--blue" /> Walk-in
+        <span className="hourly-dot hourly-dot--amber" style={{ marginLeft: 16 }} /> IVR
+      </div>
+      <svg viewBox="0 0 640 160" width="100%" style={{ display: 'block', overflow: 'visible' }}>
+        {/* Grid lines */}
+        {[0, 0.25, 0.5, 0.75, 1].map(f => {
+          const y = 10 + Math.round(f * CHART_H);
+          return <line key={f} x1="36" y1={y} x2="604" y2={y} stroke="#e2e8f0" strokeWidth="0.5" />;
+        })}
+        {/* Y-axis labels */}
+        {[0, 0.5, 1].map(f => {
+          const y = 10 + Math.round(f * CHART_H);
+          const val = Math.round(maxVal * (1 - f));
+          return <text key={f} x="30" y={y + 4} textAnchor="end" fontSize="10" fill="#94a3b8">{val}</text>;
+        })}
+        {/* Walk-in line */}
+        <polyline points={walkinPts} fill="none" stroke="#2563eb" strokeWidth="2" strokeLinejoin="round" />
+        {slots.map((h, i) => {
+          const x = 40 + Math.round((i / (slots.length - 1)) * 560);
+          const y = 10 + yFor(h.walkin);
+          return <circle key={i} cx={x} cy={y} r="3.5" fill="#2563eb" />;
+        })}
+        {/* IVR line */}
+        <polyline points={ivrPts} fill="none" stroke="#d97706" strokeWidth="2" strokeLinejoin="round" />
+        {slots.map((h, i) => {
+          const x = 40 + Math.round((i / (slots.length - 1)) * 560);
+          const y = 10 + yFor(h.ivr);
+          return <circle key={i} cx={x} cy={y} r="3.5" fill="#d97706" />;
+        })}
+        {/* X-axis labels */}
+        {slots.map((h, i) => {
+          if (i % 2 !== 0) return null;
+          const x = 40 + Math.round((i / (slots.length - 1)) * 560);
+          return <text key={h.hour} x={x} y={148} textAnchor="middle" fontSize="10" fill="#94a3b8">{h.label}</text>;
+        })}
+      </svg>
+    </div>
+  );
+}
+
 // ─── main component ──────────────────────────────────────────────────────────
 
 export default function ReportsView() {
@@ -402,6 +697,7 @@ export default function ReportsView() {
 
   const [walkinReport, setWalkinReport] = useState(null);
   const [ivrReport, setIvrReport] = useState(null);
+  const [conversionReport, setConversionReport] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -411,12 +707,14 @@ export default function ReportsView() {
     try {
       const opts = { filterType, customStartDate, customEndDate };
       const walkinOpts = { filterType, customDate: customStartDate };
-      const [w, iv] = await Promise.all([
+      const [w, iv, conv] = await Promise.all([
         getWalkinReports(walkinOpts),
         getIVRReports(opts),
+        getConversionReport(opts),
       ]);
       setWalkinReport(w);
       setIvrReport(iv);
+      setConversionReport(conv);
     } catch (err) {
       setError(err?.message || 'Unable to load reports.');
     } finally {
@@ -742,6 +1040,13 @@ export default function ReportsView() {
             </button>
             <button
               type="button"
+              className={`report-filter-btn${viewMode === 'conversion' ? ' active' : ''}`}
+              onClick={() => setViewMode('conversion')}
+            >
+              Conversion
+            </button>
+            <button
+              type="button"
               className={`report-filter-btn${viewMode === 'table' ? ' active' : ''}`}
               onClick={() => setViewMode('table')}
             >
@@ -762,6 +1067,17 @@ export default function ReportsView() {
               {source !== 'walkin' && active.reviewStatusBreakdown?.length > 0 && (
                 <BarChart title="IVR review status" items={active.reviewStatusBreakdown} color="green" />
               )}
+            </div>
+          )}
+
+          {/* ── Conversion reports ── */}
+          {viewMode === 'conversion' && (
+            <div className="reports-conversion-grid">
+              <BusinessOutcomes data={conversionReport} />
+              <AgentPerformanceTable data={conversionReport} />
+              <BranchConversionTable data={conversionReport} />
+              <DailyTrendChart data={conversionReport} />
+              <HourlyTrendChart data={conversionReport} />
             </div>
           )}
 
