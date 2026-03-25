@@ -576,24 +576,31 @@ function DetailsPreviewCell({ dbLead, recordingUrl, rowStatus, savedSummary, err
 function IVRRow({ row, cars, locations, loadingCars, loadingLocations, onMarkUninterested, onSaveInterested, onFocusNext, interestedBtnRef, isFocused }) {
   const dbLead = row.dbLead || null;
   const recordingUrl = dbLead?.call_recording_url || row.callRecordingUrl || null;
+
+  // Remarks pre-filled from AI summary. A separate ref tracks the "original"
+  // value so we can show an "Edited" badge when the operator changes it.
+  const aiSummary = dbLead?.conversation_summary || '';
+  const initialRemarks = dbLead?.remarks || aiSummary || '';
+
   const [data, setData] = useState(() => ({
     ...BLANK_ROW_DATA,
     customerName: dbLead?.customer_name || '',
     modelName: dbLead?.model_name || '',
     fuelType: dbLead?.fuel_type || '',
-    conversationSummary: dbLead?.conversation_summary || '',
-    remarks: dbLead?.remarks || '',
+    conversationSummary: aiSummary,
+    remarks: initialRemarks,
     transcript: dbLead?.transcript || '',
     salespersonId: row.matchedSalespersonId || '',
     locationId: row.matchedLocationId || '',
   }));
+  const [remarksOriginal, setRemarksOriginal] = useState(initialRemarks);
   const [salespersons, setSalespersons] = useState(row.matchedSalesperson ? [row.matchedSalesperson] : []);
   const [loadingSP, setLoadingSP] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [showTranscript, setShowTranscript] = useState(false);
+  const [showAudio, setShowAudio] = useState(false);
 
   const customerNameRef = useRef(null);
-  const modelRef = useRef(null);
   const remarksRef = useRef(null);
 
   useEffect(() => {
@@ -607,8 +614,8 @@ function IVRRow({ row, cars, locations, loadingCars, loadingLocations, onMarkUni
   const set = (field, value) => setData(prev => ({ ...prev, [field]: value }));
   const isDone = row.status === STATUS.SAVED || row.status === STATUS.UNINTERESTED;
   const isSaving = row.status === STATUS.SAVING;
+  const remarksEdited = data.remarks.trim() !== remarksOriginal.trim();
 
-  // #7: Left-border accent by status
   const rowClass =
     row.status === STATUS.SAVED ? 'border-l-4 border-l-emerald-500 bg-emerald-50/40' :
     row.status === STATUS.UNINTERESTED ? 'border-l-4 border-l-red-300 bg-red-50/30 opacity-55' :
@@ -624,25 +631,40 @@ function IVRRow({ row, cars, locations, loadingCars, loadingLocations, onMarkUni
     if ((e.key === 'u' || e.key === 'U') && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') { e.preventDefault(); onMarkUninterested(row.id); onFocusNext(); }
   }, [isDone, isSaving, onMarkUninterested, onFocusNext, row.id]);
 
-  const chainEnter = (e, nextRef) => { if (e.key === 'Enter') { e.preventDefault(); nextRef?.current?.focus(); } };
-  const handleRemarksKeyDown = useCallback((e) => { if (e.key === 'Enter') { e.preventDefault(); handleSave(); } }, [handleSave]);
+  // Shift+Enter adds a newline in the textarea; plain Enter saves
+  const handleRemarksKeyDown = useCallback((e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSave(); }
+  }, [handleSave]);
 
-  // #2: Pre-fill from AI data when opening editor
+  // When opening the editor, refresh from latest dbLead data (transcription may have
+  // completed since the file was uploaded). Also set the remarks baseline so the
+  // "Edited" badge only appears when the operator actually changes something.
   const openExpandedEditor = () => {
-    setData(prev => ({ ...prev, customerName: dbLead?.customer_name || prev.customerName, modelName: dbLead?.model_name || prev.modelName, fuelType: dbLead?.fuel_type || prev.fuelType, conversationSummary: dbLead?.conversation_summary || prev.conversationSummary, remarks: dbLead?.remarks || prev.remarks, transcript: dbLead?.transcript || prev.transcript }));
+    const freshSummary = dbLead?.conversation_summary || aiSummary;
+    const freshRemarks = dbLead?.remarks || freshSummary || '';
+    setData(prev => ({
+      ...prev,
+      customerName: dbLead?.customer_name || prev.customerName,
+      modelName: dbLead?.model_name || prev.modelName,
+      fuelType: dbLead?.fuel_type || prev.fuelType,
+      conversationSummary: freshSummary,
+      remarks: freshRemarks,
+      transcript: dbLead?.transcript || prev.transcript,
+    }));
+    setRemarksOriginal(freshRemarks);
     setExpanded(true);
     setTimeout(() => customerNameRef.current?.focus(), 50);
   };
 
+  const transcriptionStatus = row.transcription_status || dbLead?.transcription_status;
+  const transcriptionErr = row.transcription_error || dbLead?.transcription_error;
+  const { label: txLabel, color: txColor } = normalizeTranscriptionStatus({ transcription_status: transcriptionStatus });
+
   const aiBadge = () => {
     if (!recordingUrl) return <span className="text-slate-300 text-[10px]">No recording</span>;
-    // Use row.transcription_status for draft leads, or dbLead.transcription_status for existing records
-    const transcriptionStatus = row.transcription_status || dbLead?.transcription_status;
-    const transcriptionErr = row.transcription_error || dbLead?.transcription_error;
-    const { label, color } = normalizeTranscriptionStatus({ transcription_status: transcriptionStatus });
     return (
       <div className="flex flex-col gap-1">
-        <span className={`w-fit text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${color}`}>{label}</span>
+        <span className={`w-fit text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${txColor}`}>{txLabel}</span>
         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600 font-semibold">Recording linked</span>
         {transcriptionErr && (
           <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-50 text-red-600 font-semibold border border-red-200">{transcriptionErr}</span>
@@ -677,7 +699,7 @@ function IVRRow({ row, cars, locations, loadingCars, loadingLocations, onMarkUni
           {row.status === STATUS.SAVING && <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-600 animate-pulse">Saving…</span>}
         </td>
 
-        {/* #1: Compact details cell with drawer */}
+        {/* Compact details cell with drawer */}
         <DetailsPreviewCell dbLead={dbLead} recordingUrl={recordingUrl} rowStatus={row.status} savedSummary={row.savedSummary} errorMessage={row.errorMessage} />
 
         <td className="px-3 py-2 text-right whitespace-nowrap">
@@ -702,8 +724,6 @@ function IVRRow({ row, cars, locations, loadingCars, loadingLocations, onMarkUni
                 Unin.
               </button>
               {expanded && <button type="button" className="text-[11px] text-slate-400 underline ml-0.5" onClick={() => setExpanded(false)}>Cancel</button>}
-
-              {/* #6: Context-sensitive keyboard shortcut tooltip on focused row */}
               {isFocused && !expanded && (
                 <div className="absolute -top-7 right-0 flex gap-1.5 text-[10px] bg-slate-800 text-white rounded-lg px-2 py-1 whitespace-nowrap shadow-lg z-10 pointer-events-none">
                   <span><kbd className="font-mono bg-slate-600 rounded px-1">Enter</kbd> interested</span>
@@ -715,61 +735,155 @@ function IVRRow({ row, cars, locations, loadingCars, loadingLocations, onMarkUni
         </td>
       </tr>
 
-      {/* #2: Expanded editor pre-filled from AI data */}
+      {/* ── Expanded inline editor ── */}
       {expanded && !isDone && (
         <tr className="bg-slate-50/80 border-b border-slate-200">
           <td colSpan={8} className="px-4 py-3">
-            <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 lg:grid-cols-6">
-              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
-                Customer Name
-                <input ref={customerNameRef} type="text" className="kiosk-input !min-h-[36px] !py-1.5 !text-sm" placeholder="Optional" value={data.customerName} onChange={e => set('customerName', e.target.value)} onKeyDown={e => chainEnter(e, modelRef)} />
-              </label>
-              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
-                Model
-                {data.modelName && <span className="text-[9px] text-emerald-600 font-semibold -mb-0.5">AI pre-filled ✓</span>}
-                <select ref={modelRef} className="kiosk-select !min-h-[36px] !py-1.5 !text-sm" value={data.modelName} onChange={e => set('modelName', e.target.value)} disabled={loadingCars}>
-                  <option value="">{loadingCars ? 'Loading…' : 'Optional'}</option>
-                  {cars.map(car => <option key={car.id} value={car.name}>{car.name}</option>)}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
-                Fuel
-                {data.fuelType && <span className="text-[9px] text-emerald-600 font-semibold -mb-0.5">AI pre-filled ✓</span>}
-                <select className="kiosk-select !min-h-[36px] !py-1.5 !text-sm" value={data.fuelType} onChange={e => set('fuelType', e.target.value)}>
-                  <option value="">Optional</option>
-                  {FUEL_OPTIONS.map(f => <option key={f.code} value={f.code}>{f.label}</option>)}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
-                Branch
-                <select className="kiosk-select !min-h-[36px] !py-1.5 !text-sm" value={data.locationId} onChange={e => set('locationId', e.target.value)} disabled={loadingLocations}>
-                  <option value="">{loadingLocations ? 'Loading…' : 'Select branch'}</option>
-                  {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name || `Branch #${loc.id}`}</option>)}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
-                Sales Advisor
-                {data.salespersonId && row.matchedSalesperson && <span className="text-[9px] text-emerald-600 font-semibold -mb-0.5">Auto-matched ✓</span>}
-                <select className="kiosk-select !min-h-[36px] !py-1.5 !text-sm" value={data.salespersonId} onChange={e => set('salespersonId', e.target.value)} disabled={loadingSP}>
-                  <option value="">{loadingSP ? 'Loading…' : 'Select advisor'}</option>
-                  {salespersons.map(sp => <option key={sp.id} value={sp.id}>{getDisplayName(sp)}</option>)}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
-                Remarks <span className="font-normal text-slate-400">(operator note)</span>
-                <input ref={remarksRef} type="text" className="kiosk-input !min-h-[36px] !py-1.5 !text-sm" placeholder="Optional · Enter to save" value={data.remarks} onChange={e => set('remarks', e.target.value)} onKeyDown={handleRemarksKeyDown} />
-              </label>
-            </div>
-            {dbLead?.transcript && (
-              <div className="mt-2.5 flex items-center gap-2 text-xs">
-                <span className="text-purple-600 font-semibold">📄 Transcript ready</span>
-                <button type="button" onClick={() => setShowTranscript(true)} className="text-blue-500 underline hover:text-blue-700">View full transcript</button>
+            <div className="flex flex-col gap-3">
+
+              {/* Audio player + transcript button — only shown when a recording exists */}
+              {recordingUrl && (
+                <div className="flex items-center gap-3 bg-white rounded-xl border border-slate-200 px-3 py-2">
+                  <button type="button"
+                    onClick={() => setShowAudio(true)}
+                    className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg bg-sky-50 text-sky-700 font-semibold border border-sky-200 hover:bg-sky-100 transition-colors">
+                    ▶ Play Recording
+                  </button>
+                  {dbLead?.transcript ? (
+                    <button type="button"
+                      onClick={() => setShowTranscript(true)}
+                      className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg bg-purple-50 text-purple-700 font-semibold border border-purple-200 hover:bg-purple-100 transition-colors">
+                      📄 View Transcript
+                    </button>
+                  ) : (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${txColor}`}>{txLabel}</span>
+                  )}
+                  <span className="text-[10px] text-slate-400 ml-auto">{row.callDate || ''}</span>
+                </div>
+              )}
+
+              {/* AI Summary — read-only display, with "Copy to remarks" shortcut */}
+              {data.conversationSummary && (
+                <div className="bg-blue-50 rounded-xl border border-blue-100 px-3 py-2">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wide">AI Summary</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        set('remarks', data.conversationSummary);
+                        setRemarksOriginal(data.conversationSummary);
+                        setTimeout(() => remarksRef.current?.focus(), 50);
+                      }}
+                      className="text-[10px] text-blue-600 underline hover:text-blue-800 font-medium">
+                      ↓ Copy to remarks
+                    </button>
+                  </div>
+                  <p className="text-xs text-blue-900 leading-relaxed">{data.conversationSummary}</p>
+                </div>
+              )}
+
+              {/* Fields: Branch · Sales Advisor · Customer Name · Model · Fuel */}
+              <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 lg:grid-cols-5">
+                <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
+                  Branch
+                  <select
+                    className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
+                    value={data.locationId}
+                    onChange={e => set('locationId', e.target.value)}
+                    disabled={loadingLocations}>
+                    <option value="">{loadingLocations ? 'Loading…' : 'Select branch'}</option>
+                    {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name || `Branch #${loc.id}`}</option>)}
+                  </select>
+                </label>
+
+                <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
+                  Sales Advisor
+                  {data.salespersonId && row.matchedSalesperson && (
+                    <span className="text-[9px] text-emerald-600 font-semibold -mb-0.5">Auto-matched ✓</span>
+                  )}
+                  <select
+                    className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
+                    value={data.salespersonId}
+                    onChange={e => set('salespersonId', e.target.value)}
+                    disabled={loadingSP}>
+                    <option value="">{loadingSP ? 'Loading…' : 'Select advisor'}</option>
+                    {salespersons.map(sp => <option key={sp.id} value={sp.id}>{getDisplayName(sp)}</option>)}
+                  </select>
+                </label>
+
+                <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
+                  Customer Name
+                  <input
+                    ref={customerNameRef}
+                    type="text"
+                    className="kiosk-input !min-h-[36px] !py-1.5 !text-sm"
+                    placeholder="Optional"
+                    value={data.customerName}
+                    onChange={e => set('customerName', e.target.value)}
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
+                  Model
+                  {data.modelName && <span className="text-[9px] text-emerald-600 font-semibold -mb-0.5">AI pre-filled ✓</span>}
+                  <select
+                    className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
+                    value={data.modelName}
+                    onChange={e => set('modelName', e.target.value)}
+                    disabled={loadingCars}>
+                    <option value="">{loadingCars ? 'Loading…' : 'Optional'}</option>
+                    {cars.map(car => <option key={car.id} value={car.name}>{car.name}</option>)}
+                  </select>
+                </label>
+
+                <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
+                  Fuel
+                  {data.fuelType && <span className="text-[9px] text-emerald-600 font-semibold -mb-0.5">AI pre-filled ✓</span>}
+                  <select
+                    className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
+                    value={data.fuelType}
+                    onChange={e => set('fuelType', e.target.value)}>
+                    <option value="">Optional</option>
+                    {FUEL_OPTIONS.map(f => <option key={f.code} value={f.code}>{f.label}</option>)}
+                  </select>
+                </label>
               </div>
-            )}
+
+              {/* Remarks — pre-filled from AI summary, fully editable */}
+              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
+                <span className="flex items-center gap-2">
+                  Remarks
+                  {!remarksEdited && data.remarks && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 font-semibold border border-blue-100">
+                      Pre-filled from AI ✓
+                    </span>
+                  )}
+                  {remarksEdited && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 font-semibold border border-amber-200">
+                      Edited
+                    </span>
+                  )}
+                  <span className="font-normal text-slate-400 ml-auto">Shift+Enter for new line · Enter to save</span>
+                </span>
+                <textarea
+                  ref={remarksRef}
+                  rows={3}
+                  className="kiosk-input !py-2 !text-sm resize-y"
+                  placeholder="Operator remarks — edit AI summary or write your own"
+                  value={data.remarks}
+                  onChange={e => set('remarks', e.target.value)}
+                  onKeyDown={handleRemarksKeyDown}
+                  style={{ minHeight: '70px', fontFamily: 'inherit', lineHeight: '1.5' }}
+                />
+              </label>
+
+            </div>
           </td>
         </tr>
       )}
+
       {showTranscript && <TranscriptModal transcript={dbLead?.transcript} onClose={() => setShowTranscript(false)} />}
+      {showAudio && <AudioPopover recordingUrl={recordingUrl} onClose={() => setShowAudio(false)} />}
     </tbody>
   );
 }
