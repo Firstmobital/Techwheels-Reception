@@ -6,6 +6,62 @@ import {
   getSalesPersonsByLocation
 } from '../../services/walkinService';
 import { supabase } from '../../services/supabaseClient';
+/* ── Scoped styles for the IVR expanded-row UI ───────────────────────────── */
+const IVR_ROW_STYLES = `
+  .ivr-expand-wrap { background:#f8fafc; border-bottom:1px solid #e2e8f0; }
+  .ivr-expand-inner { padding:14px 16px 16px 16px; display:flex; flex-direction:column; gap:12px; }
+  .ivr-audio-bar { background:#fff; border:1px solid #e2e8f0; border-radius:10px; padding:8px 12px; display:flex; align-items:center; gap:10px; }
+  .ivr-play-btn { width:28px; height:28px; border-radius:50%; background:#185FA5; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; transition:background .15s; }
+  .ivr-play-btn:hover { background:#0C447C; }
+  .ivr-play-btn svg { display:block; }
+  .ivr-waveform { flex:1; height:22px; display:flex; align-items:center; gap:1.5px; }
+  .ivr-waveform span { display:block; border-radius:2px; width:3px; background:#B5D4F4; }
+  .ivr-waveform span.ivr-wave-active { background:#378ADD; }
+  .ivr-audio-dur { font-size:11px; color:#94a3b8; min-width:30px; text-align:right; }
+  .ivr-transcript-btn { font-size:11px; font-weight:600; color:#7C3AED; background:#F5F3FF; border:1px solid #DDD6FE; border-radius:7px; padding:4px 10px; cursor:pointer; white-space:nowrap; transition:background .15s; display:flex; align-items:center; gap:4px; }
+  .ivr-transcript-btn:hover { background:#EDE9FE; }
+  .ivr-tx-status { font-size:10px; font-weight:600; padding:2px 7px; border-radius:99px; }
+  .ivr-audio-date { font-size:11px; color:#94a3b8; margin-left:auto; }
+  .ivr-ai-box { background:#EFF6FF; border:1px solid #BFDBFE; border-left:3px solid #3B82F6; border-radius:10px; padding:10px 12px; }
+  .ivr-ai-box-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:5px; }
+  .ivr-ai-label { font-size:10px; font-weight:700; color:#2563EB; text-transform:uppercase; letter-spacing:.06em; }
+  .ivr-ai-copy-btn { font-size:10px; font-weight:600; color:#2563EB; background:none; border:none; cursor:pointer; text-decoration:underline; padding:0; }
+  .ivr-ai-copy-btn:hover { color:#1D4ED8; }
+  .ivr-ai-text { font-size:12px; color:#1E3A8A; line-height:1.6; margin:0; }
+  .ivr-fields-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; }
+  @media (max-width:1100px) { .ivr-fields-grid { grid-template-columns:repeat(3,1fr); } }
+  @media (max-width:700px) { .ivr-fields-grid { grid-template-columns:repeat(2,1fr); } }
+  .ivr-field { display:flex; flex-direction:column; gap:4px; }
+  .ivr-field-label { font-size:11px; font-weight:600; color:#475569; display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+  .ivr-badge-ai { font-size:9px; font-weight:600; color:#15803D; background:#DCFCE7; padding:1px 5px; border-radius:99px; }
+  .ivr-badge-match { font-size:9px; font-weight:600; color:#15803D; background:#DCFCE7; padding:1px 5px; border-radius:99px; }
+  .ivr-select, .ivr-input { background:#fff; border:1px solid #CBD5E1; border-radius:7px; padding:6px 9px; font-size:13px; color:#1e293b; font-family:inherit; width:100%; min-height:34px; outline:none; transition:border-color .15s, box-shadow .15s; appearance:auto; }
+  .ivr-select:focus, .ivr-input:focus { border-color:#3B82F6; box-shadow:0 0 0 3px rgba(59,130,246,.12); }
+  .ivr-select:disabled, .ivr-input:disabled { background:#f1f5f9; color:#94a3b8; cursor:not-allowed; }
+  .ivr-remarks-wrap { display:flex; flex-direction:column; gap:5px; }
+  .ivr-remarks-header { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .ivr-remarks-title { font-size:11px; font-weight:600; color:#475569; }
+  .ivr-badge-prefill { font-size:9px; font-weight:600; color:#2563EB; background:#EFF6FF; border:1px solid #BFDBFE; padding:1px 6px; border-radius:99px; }
+  .ivr-badge-edited { font-size:9px; font-weight:600; color:#92400E; background:#FFFBEB; border:1px solid #FDE68A; padding:1px 6px; border-radius:99px; }
+  .ivr-remarks-hint { font-size:10px; color:#94a3b8; margin-left:auto; }
+  .ivr-textarea { background:#fff; border:1px solid #CBD5E1; border-radius:7px; padding:8px 10px; font-size:13px; color:#1e293b; font-family:inherit; width:100%; min-height:72px; resize:vertical; outline:none; line-height:1.55; transition:border-color .15s, box-shadow .15s; }
+  .ivr-textarea:focus { border-color:#3B82F6; box-shadow:0 0 0 3px rgba(59,130,246,.12); }
+`;
+
+function IVRStyleInjector() {
+  useEffect(() => {
+    const id = 'ivr-row-styles';
+    if (!document.getElementById(id)) {
+      const el = document.createElement('style');
+      el.id = id;
+      el.textContent = IVR_ROW_STYLES;
+      document.head.appendChild(el);
+    }
+  }, []);
+  return null;
+}
+
+
 
 const IVR_LEADS_TABLE = 'ivr_leads';
 const EMPLOYEES_TABLE = 'employees';
@@ -735,147 +791,126 @@ function IVRRow({ row, cars, locations, loadingCars, loadingLocations, onMarkUni
         </td>
       </tr>
 
-      {/* ── Expanded inline editor ── */}
+      {/* ── Expanded inline editor — styled to match the mockup exactly ── */}
       {expanded && !isDone && (
-        <tr className="bg-slate-50/80 border-b border-slate-200">
-          <td colSpan={8} className="px-4 py-3">
-            <div className="flex flex-col gap-3">
+        <tr className="ivr-expand-wrap">
+          <td colSpan={8} style={{padding:0}}>
+            <IVRStyleInjector />
+            <div className="ivr-expand-inner">
 
-              {/* Audio player + transcript button — only shown when a recording exists */}
+              {/* ── 1. Audio bar ── */}
               {recordingUrl && (
-                <div className="flex items-center gap-3 bg-white rounded-xl border border-slate-200 px-3 py-2">
-                  <button type="button"
-                    onClick={() => setShowAudio(true)}
-                    className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg bg-sky-50 text-sky-700 font-semibold border border-sky-200 hover:bg-sky-100 transition-colors">
-                    ▶ Play Recording
+                <div className="ivr-audio-bar">
+                  <button type="button" className="ivr-play-btn" onClick={() => setShowAudio(true)} title="Play recording">
+                    <svg width="9" height="11" viewBox="0 0 9 11" fill="none">
+                      <path d="M1 1l7 4.5L1 10V1z" fill="white"/>
+                    </svg>
                   </button>
+                  <div className="ivr-waveform">
+                    {[5,9,14,8,17,10,13,7,16,9,11,6,14,12,8,15,10,7,13,9,11,5,8,14].map((h,i) => (
+                      <span key={i} className={i < 5 ? 'ivr-wave-active' : ''} style={{height:`${h}px`}} />
+                    ))}
+                  </div>
+                  <span className="ivr-audio-dur">2:14</span>
                   {dbLead?.transcript ? (
-                    <button type="button"
-                      onClick={() => setShowTranscript(true)}
-                      className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg bg-purple-50 text-purple-700 font-semibold border border-purple-200 hover:bg-purple-100 transition-colors">
-                      📄 View Transcript
+                    <button type="button" className="ivr-transcript-btn" onClick={() => setShowTranscript(true)}>
+                      <span style={{fontSize:'13px'}}>📄</span> View transcript
                     </button>
                   ) : (
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${txColor}`}>{txLabel}</span>
+                    <span className={`ivr-tx-status ${txColor}`}>{txLabel}</span>
                   )}
-                  <span className="text-[10px] text-slate-400 ml-auto">{row.callDate || ''}</span>
+                  {row.callDate && <span className="ivr-audio-date">{row.callDate}</span>}
                 </div>
               )}
 
-              {/* AI Summary — read-only display, with "Copy to remarks" shortcut */}
+              {/* ── 2. AI Summary ── */}
               {data.conversationSummary && (
-                <div className="bg-blue-50 rounded-xl border border-blue-100 px-3 py-2">
-                  <div className="flex items-center justify-between mb-1">
-                    <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wide">AI Summary</p>
+                <div className="ivr-ai-box">
+                  <div className="ivr-ai-box-header">
+                    <span className="ivr-ai-label">AI Summary</span>
                     <button
                       type="button"
+                      className="ivr-ai-copy-btn"
                       onClick={() => {
                         set('remarks', data.conversationSummary);
                         setRemarksOriginal(data.conversationSummary);
                         setTimeout(() => remarksRef.current?.focus(), 50);
-                      }}
-                      className="text-[10px] text-blue-600 underline hover:text-blue-800 font-medium">
+                      }}>
                       ↓ Copy to remarks
                     </button>
                   </div>
-                  <p className="text-xs text-blue-900 leading-relaxed">{data.conversationSummary}</p>
+                  <p className="ivr-ai-text">{data.conversationSummary}</p>
                 </div>
               )}
 
-              {/* Fields: Branch · Sales Advisor · Customer Name · Model · Fuel */}
-              <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 lg:grid-cols-5">
-                <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
-                  Branch
-                  <select
-                    className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
-                    value={data.locationId}
-                    onChange={e => set('locationId', e.target.value)}
-                    disabled={loadingLocations}>
+              {/* ── 3. Fields grid: Branch · Advisor · Name · Model · Fuel ── */}
+              <div className="ivr-fields-grid">
+
+                <div className="ivr-field">
+                  <span className="ivr-field-label">Branch</span>
+                  <select className="ivr-select" value={data.locationId} onChange={e => set('locationId', e.target.value)} disabled={loadingLocations}>
                     <option value="">{loadingLocations ? 'Loading…' : 'Select branch'}</option>
                     {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name || `Branch #${loc.id}`}</option>)}
                   </select>
-                </label>
+                </div>
 
-                <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
-                  Sales Advisor
-                  {data.salespersonId && row.matchedSalesperson && (
-                    <span className="text-[9px] text-emerald-600 font-semibold -mb-0.5">Auto-matched ✓</span>
-                  )}
-                  <select
-                    className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
-                    value={data.salespersonId}
-                    onChange={e => set('salespersonId', e.target.value)}
-                    disabled={loadingSP}>
+                <div className="ivr-field">
+                  <span className="ivr-field-label">
+                    Sales Advisor
+                    {data.salespersonId && row.matchedSalesperson && <span className="ivr-badge-match">Auto-matched ✓</span>}
+                  </span>
+                  <select className="ivr-select" value={data.salespersonId} onChange={e => set('salespersonId', e.target.value)} disabled={loadingSP}>
                     <option value="">{loadingSP ? 'Loading…' : 'Select advisor'}</option>
                     {salespersons.map(sp => <option key={sp.id} value={sp.id}>{getDisplayName(sp)}</option>)}
                   </select>
-                </label>
+                </div>
 
-                <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
-                  Customer Name
-                  <input
-                    ref={customerNameRef}
-                    type="text"
-                    className="kiosk-input !min-h-[36px] !py-1.5 !text-sm"
-                    placeholder="Optional"
-                    value={data.customerName}
-                    onChange={e => set('customerName', e.target.value)}
-                  />
-                </label>
+                <div className="ivr-field">
+                  <span className="ivr-field-label">Customer Name</span>
+                  <input ref={customerNameRef} type="text" className="ivr-input" placeholder="Optional" value={data.customerName} onChange={e => set('customerName', e.target.value)} />
+                </div>
 
-                <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
-                  Model
-                  {data.modelName && <span className="text-[9px] text-emerald-600 font-semibold -mb-0.5">AI pre-filled ✓</span>}
-                  <select
-                    className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
-                    value={data.modelName}
-                    onChange={e => set('modelName', e.target.value)}
-                    disabled={loadingCars}>
+                <div className="ivr-field">
+                  <span className="ivr-field-label">
+                    Model
+                    {data.modelName && <span className="ivr-badge-ai">AI ✓</span>}
+                  </span>
+                  <select className="ivr-select" value={data.modelName} onChange={e => set('modelName', e.target.value)} disabled={loadingCars}>
                     <option value="">{loadingCars ? 'Loading…' : 'Optional'}</option>
                     {cars.map(car => <option key={car.id} value={car.name}>{car.name}</option>)}
                   </select>
-                </label>
+                </div>
 
-                <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
-                  Fuel
-                  {data.fuelType && <span className="text-[9px] text-emerald-600 font-semibold -mb-0.5">AI pre-filled ✓</span>}
-                  <select
-                    className="kiosk-select !min-h-[36px] !py-1.5 !text-sm"
-                    value={data.fuelType}
-                    onChange={e => set('fuelType', e.target.value)}>
+                <div className="ivr-field">
+                  <span className="ivr-field-label">
+                    Fuel
+                    {data.fuelType && <span className="ivr-badge-ai">AI ✓</span>}
+                  </span>
+                  <select className="ivr-select" value={data.fuelType} onChange={e => set('fuelType', e.target.value)}>
                     <option value="">Optional</option>
                     {FUEL_OPTIONS.map(f => <option key={f.code} value={f.code}>{f.label}</option>)}
                   </select>
-                </label>
+                </div>
+
               </div>
 
-              {/* Remarks — pre-filled from AI summary, fully editable */}
-              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-600">
-                <span className="flex items-center gap-2">
-                  Remarks
-                  {!remarksEdited && data.remarks && (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 font-semibold border border-blue-100">
-                      Pre-filled from AI ✓
-                    </span>
-                  )}
-                  {remarksEdited && (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 font-semibold border border-amber-200">
-                      Edited
-                    </span>
-                  )}
-                  <span className="font-normal text-slate-400 ml-auto">Shift+Enter for new line · Enter to save</span>
-                </span>
+              {/* ── 4. Remarks textarea ── */}
+              <div className="ivr-remarks-wrap">
+                <div className="ivr-remarks-header">
+                  <span className="ivr-remarks-title">Remarks</span>
+                  {!remarksEdited && data.remarks && <span className="ivr-badge-prefill">Pre-filled from AI ✓</span>}
+                  {remarksEdited && <span className="ivr-badge-edited">Edited</span>}
+                  <span className="ivr-remarks-hint">Shift+Enter for new line · Enter to save</span>
+                </div>
                 <textarea
                   ref={remarksRef}
-                  rows={3}
-                  className="kiosk-input !py-2 !text-sm resize-y"
+                  className="ivr-textarea"
                   placeholder="Operator remarks — edit AI summary or write your own"
                   value={data.remarks}
                   onChange={e => set('remarks', e.target.value)}
                   onKeyDown={handleRemarksKeyDown}
-                  style={{ minHeight: '70px', fontFamily: 'inherit', lineHeight: '1.5' }}
                 />
-              </label>
+              </div>
 
             </div>
           </td>
