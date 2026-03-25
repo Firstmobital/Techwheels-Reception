@@ -46,6 +46,17 @@ const IVR_ROW_STYLES = `
   .ivr-remarks-hint { font-size:10px; color:#94a3b8; margin-left:auto; }
   .ivr-textarea { background:#fff; border:1px solid #CBD5E1; border-radius:7px; padding:8px 10px; font-size:13px; color:#1e293b; font-family:inherit; width:100%; min-height:72px; resize:vertical; outline:none; line-height:1.55; transition:border-color .15s, box-shadow .15s; }
   .ivr-textarea:focus { border-color:#3B82F6; box-shadow:0 0 0 3px rgba(59,130,246,.12); }
+  .ivr-action-bar { display:flex; align-items:center; gap:8px; border-top:1px solid #e2e8f0; padding-top:10px; }
+  .ivr-action-spacer { flex:1; }
+  .ivr-action-hint { font-size:10px; color:#94a3b8; }
+  .ivr-action-btn { font-size:11px; font-weight:600; border-radius:7px; padding:6px 10px; border:1px solid transparent; cursor:pointer; transition:background .15s, border-color .15s; }
+  .ivr-action-btn:disabled { opacity:.55; cursor:not-allowed; }
+  .ivr-action-btn-neutral { background:#fff; color:#475569; border-color:#cbd5e1; }
+  .ivr-action-btn-neutral:hover:not(:disabled) { background:#f8fafc; }
+  .ivr-action-btn-danger { background:#fff; color:#dc2626; border-color:#fecaca; }
+  .ivr-action-btn-danger:hover:not(:disabled) { background:#fef2f2; }
+  .ivr-action-btn-primary { background:#16a34a; color:#fff; }
+  .ivr-action-btn-primary:hover:not(:disabled) { background:#15803d; }
 `;
 
 function IVRStyleInjector() {
@@ -716,6 +727,34 @@ function IVRRow({ row, cars, locations, loadingCars, loadingLocations, onMarkUni
   const transcriptionErr = row.transcription_error || dbLead?.transcription_error;
   const { label: txLabel, color: txColor } = normalizeTranscriptionStatus({ transcription_status: transcriptionStatus });
 
+  useEffect(() => {
+    if (!expanded) return;
+    const latestSummary = dbLead?.conversation_summary || '';
+    const latestTranscript = dbLead?.transcript || '';
+    const latestCustomer = dbLead?.customer_name || '';
+    const latestModel = dbLead?.model_name || '';
+    const latestFuel = dbLead?.fuel_type || '';
+    const latestRemarks = dbLead?.remarks || '';
+
+    setData(prev => ({
+      ...prev,
+      customerName: prev.customerName || latestCustomer,
+      modelName: prev.modelName || latestModel,
+      fuelType: prev.fuelType || latestFuel,
+      conversationSummary: prev.conversationSummary || latestSummary,
+      remarks: prev.remarks || latestRemarks || latestSummary,
+      transcript: prev.transcript || latestTranscript,
+    }));
+  }, [
+    expanded,
+    dbLead?.customer_name,
+    dbLead?.model_name,
+    dbLead?.fuel_type,
+    dbLead?.remarks,
+    dbLead?.conversation_summary,
+    dbLead?.transcript,
+  ]);
+
   const aiBadge = () => {
     if (!recordingUrl) return <span className="text-slate-300 text-[10px]">No recording</span>;
     return (
@@ -765,24 +804,18 @@ function IVRRow({ row, cars, locations, loadingCars, loadingLocations, onMarkUni
                 <button ref={interestedBtnRef} type="button"
                   className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50"
                   onClick={openExpandedEditor} disabled={isSaving}>
-                  Interested
+                  More details
                 </button>
               ) : (
                 <button type="button"
-                  className="text-[11px] px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50"
-                  onClick={handleSave} disabled={isSaving}>
-                  {isSaving ? 'Saving…' : '✓ Save Lead'}
+                  className="text-[11px] px-2.5 py-1 rounded-lg border border-slate-300 text-slate-600 bg-white font-semibold hover:bg-slate-50 transition-colors disabled:opacity-50"
+                  onClick={() => setExpanded(false)} disabled={isSaving}>
+                  Collapse
                 </button>
               )}
-              <button type="button"
-                className="text-[11px] px-2.5 py-1 rounded-lg border border-red-200 text-red-600 bg-white font-semibold hover:bg-red-50 transition-colors disabled:opacity-50"
-                onClick={() => { onMarkUninterested(row.id); onFocusNext(); }} disabled={isSaving} title="U key shortcut">
-                Unin.
-              </button>
-              {expanded && <button type="button" className="text-[11px] text-slate-400 underline ml-0.5" onClick={() => setExpanded(false)}>Cancel</button>}
               {isFocused && !expanded && (
                 <div className="absolute -top-7 right-0 flex gap-1.5 text-[10px] bg-slate-800 text-white rounded-lg px-2 py-1 whitespace-nowrap shadow-lg z-10 pointer-events-none">
-                  <span><kbd className="font-mono bg-slate-600 rounded px-1">Enter</kbd> interested</span>
+                  <span><kbd className="font-mono bg-slate-600 rounded px-1">Enter</kbd> details</span>
                   <span><kbd className="font-mono bg-slate-600 rounded px-1">U</kbd> skip</span>
                 </div>
               )}
@@ -912,6 +945,39 @@ function IVRRow({ row, cars, locations, loadingCars, loadingLocations, onMarkUni
                 />
               </div>
 
+              <div className="ivr-action-bar">
+                <span className="ivr-action-hint">Shift+Enter adds line break · Enter on remarks saves</span>
+                <span className="ivr-action-spacer" />
+                <button
+                  type="button"
+                  className="ivr-action-btn ivr-action-btn-neutral"
+                  onClick={() => setExpanded(false)}
+                  disabled={isSaving}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="ivr-action-btn ivr-action-btn-danger"
+                  onClick={() => {
+                    onMarkUninterested(row.id);
+                    onFocusNext();
+                  }}
+                  disabled={isSaving}
+                  title="U key shortcut"
+                >
+                  Uninterested
+                </button>
+                <button
+                  type="button"
+                  className="ivr-action-btn ivr-action-btn-primary"
+                  onClick={handleSave}
+                  disabled={isSaving}
+                >
+                  {isSaving ? 'Saving…' : 'Interested'}
+                </button>
+              </div>
+
             </div>
           </td>
         </tr>
@@ -942,9 +1008,14 @@ export default function IVREntryScreen() {
   const [loadingCars, setLoadingCars] = useState(true);
   const [loadingLocations, setLoadingLocations] = useState(true);
   const interestedBtnRefs = useRef({});
+  const rowsRef = useRef([]);
   // Transcription batch creation state
   const [transcriptionStarted, setTranscriptionStarted] = useState(false);
   const [batchingLeads, setBatchingLeads] = useState(false);
+
+  useEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
 
   useEffect(() => {
     let mounted = true;
@@ -960,27 +1031,32 @@ export default function IVREntryScreen() {
 
   // Poll for transcription status updates
   useEffect(() => {
-    if (!transcriptionStarted || rows.length === 0) return;
+    if (!transcriptionStarted) return;
 
     const pollTranscriptionStatus = async () => {
-      const leadsWithIds = rows.filter(r => r.ivrLeadsId);
+      const leadsWithIds = rowsRef.current.filter(r => r.ivrLeadsId);
       if (leadsWithIds.length === 0) return;
 
       try {
-        const { data: statuses, error } = await supabase
+        const { data: leads, error } = await supabase
           .from(IVR_LEADS_TABLE)
-          .select('id, transcription_status, transcription_error')
+          .select('id, customer_name, model_name, fuel_type, remarks, conversation_summary, transcript, transcription_status, transcription_error, call_recording_url')
           .in('id', leadsWithIds.map(r => r.ivrLeadsId));
 
-        if (error || !statuses) return;
+        if (error || !leads) return;
 
-        // Update rows with fetched transcription status
-        const statusMap = new Map(statuses.map(s => [s.id, { status: s.transcription_status, error: s.transcription_error }]));
-        setRows(prev => prev.map(row => 
-          row.ivrLeadsId && statusMap.has(row.ivrLeadsId) 
-            ? { ...row, transcription_status: statusMap.get(row.ivrLeadsId).status, transcription_error: statusMap.get(row.ivrLeadsId).error }
-            : row
-        ));
+        const leadMap = new Map(leads.map(lead => [lead.id, lead]));
+        setRows(prev => prev.map(row => {
+          if (!row.ivrLeadsId || !leadMap.has(row.ivrLeadsId)) return row;
+          const latestLead = leadMap.get(row.ivrLeadsId);
+          return {
+            ...row,
+            dbLead: { ...(row.dbLead || {}), ...latestLead },
+            callRecordingUrl: row.callRecordingUrl || latestLead.call_recording_url || null,
+            transcription_status: latestLead.transcription_status || null,
+            transcription_error: latestLead.transcription_error || null,
+          };
+        }));
       } catch (err) {
         console.error('Failed to poll transcription status:', err);
       }
@@ -991,7 +1067,7 @@ export default function IVREntryScreen() {
     const timer = setInterval(pollTranscriptionStatus, 2000);
 
     return () => clearInterval(timer);
-  }, [transcriptionStarted, rows]);
+  }, [transcriptionStarted]);
 
   async function batchInsertIVRLeads(parseRowsWithMatches) {
     if (!selectedUploadLocationId) throw new Error(UPLOAD_BRANCH_REQUIRED_ERROR);
