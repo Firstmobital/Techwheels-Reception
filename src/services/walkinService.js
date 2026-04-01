@@ -72,7 +72,7 @@ function getWalkinSalespersonName(walkin) {
   return fullName || 'Unassigned';
 }
 
-function getReportDateRange(filterType = 'today', customDate = '') {
+function getReportDateRange(filterType = 'today', customStartDate = '', customEndDate = '') {
   const now = new Date();
 
   if (filterType === 'thisWeek') {
@@ -104,25 +104,33 @@ function getReportDateRange(filterType = 'today', customDate = '') {
   }
 
   if (filterType === 'custom') {
-    if (!customDate) {
-      throw new Error('Please select a date for custom report.');
+    if (!customStartDate) {
+      throw new Error('Please select a start date.');
     }
 
-    const selected = new Date(`${customDate}T00:00:00`);
-    if (Number.isNaN(selected.getTime())) {
-      throw new Error('Invalid custom date selected.');
+    const start = new Date(`${customStartDate}T00:00:00`);
+    if (Number.isNaN(start.getTime())) {
+      throw new Error('Invalid start date selected.');
     }
 
-    const start = toStartOfDay(selected);
-    const end = addDays(start, 1);
+    const endBase = customEndDate || customStartDate;
+    const endBaseDate = new Date(`${endBase}T00:00:00`);
+    if (Number.isNaN(endBaseDate.getTime())) {
+      throw new Error('Invalid end date selected.');
+    }
+
+    const startDay = toStartOfDay(start);
+    const end = addDays(toStartOfDay(endBaseDate), 1);
     return {
-      start,
+      start: startDay,
       end,
-      label: start.toLocaleDateString(undefined, {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric'
-      })
+      label: customEndDate && customEndDate !== customStartDate
+        ? `${startDay.toLocaleDateString(undefined, { day: '2-digit', month: 'short' })} - ${endBaseDate.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })}`
+        : startDay.toLocaleDateString(undefined, {
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric'
+          })
     };
   }
 
@@ -409,8 +417,14 @@ export async function getWalkinsByCreatedAtRange({ startIso, endIso }) {
   }));
 }
 
-export async function getWalkinReports({ filterType = 'today', customDate = '' } = {}) {
-  const { start, end, label } = getReportDateRange(filterType, customDate);
+export async function getWalkinReports({
+  filterType = 'today',
+  customDate = '',
+  customStartDate = '',
+  customEndDate = ''
+} = {}) {
+  const startDate = customStartDate || customDate;
+  const { start, end, label } = getReportDateRange(filterType, startDate, customEndDate);
   const startIso = start.toISOString();
   const endIso = end.toISOString();
 

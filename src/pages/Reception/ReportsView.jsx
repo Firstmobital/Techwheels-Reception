@@ -829,7 +829,7 @@ export default function ReportsView() {
     setError('');
     try {
       const opts = { filterType, customStartDate, customEndDate };
-      const walkinOpts = { filterType, customDate: customStartDate };
+      const walkinOpts = { filterType, customStartDate, customEndDate };
       const [w, iv, conv] = await Promise.all([
         getWalkinReports(walkinOpts),
         getIVRReports(opts),
