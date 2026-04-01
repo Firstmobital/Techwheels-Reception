@@ -4,6 +4,7 @@ import CustomerDetailsScreen from './CustomerDetailsScreen';
 import RepeatCustomerScreen from './RepeatCustomerScreen';
 import ModelSelectionScreen from './ModelSelectionScreen';
 import FuelSelectionScreen from './FuelSelectionScreen';
+import ExchangeEnquiryScreen from './ExchangeEnquiryScreen';
 import SalespersonSelectionScreen from './SalespersonSelectionScreen';
 import TokenScreen from './TokenScreen';
 import {
@@ -17,6 +18,7 @@ const KIOSK_STEPS = {
   REPEAT_CUSTOMER: 3,
   MODEL_SELECTION: 4,
   FUEL_SELECTION: 5,
+  EXCHANGE_ENQUIRY: 5.5,
   SALESPERSON_SELECTION: 6,
   TOKEN: 7
 };
@@ -34,7 +36,8 @@ const DEFAULT_STATE = {
   salespersonName: '',
   walkinId: null,
   tokenNumber: '',
-  returningCustomer: null
+  returningCustomer: null,
+  isExchangeEnquiry: false
 };
 
 function normalizeFuelSelection(fuelValue) {
@@ -150,7 +153,8 @@ export default function KioskContainer() {
                 fuel_type: repeatData.fuel_type,
                 fuel_types: selectedFuelTypes,
                 salesperson_id: repeatData.salesperson_id,
-                location_id: repeatData.location_id || null
+                location_id: repeatData.location_id || null,
+                is_exchange_enquiry: false
               });
 
               console.assert(Boolean(created?.token_number), '[KIOSK TEST][REPEAT] Token should be generated for repeat customer.');
@@ -165,7 +169,8 @@ export default function KioskContainer() {
                 salespersonId: repeatData.salesperson_id || '',
                 salespersonName: repeatData.last_salesperson || '',
                 walkinId: created.id,
-                tokenNumber: created.token_number || ''
+                tokenNumber: created.token_number || '',
+                isExchangeEnquiry: false
               }));
 
               logKioskTest('REPEAT', 'Continue with same purpose generated token and saved walk-in.', {
@@ -258,8 +263,25 @@ export default function KioskContainer() {
               ...prev,
               fuelTypes
             }));
+            setStep(KIOSK_STEPS.EXCHANGE_ENQUIRY);
+          }}
+        />
+      );
+    }
+
+    if (step === KIOSK_STEPS.EXCHANGE_ENQUIRY) {
+      return (
+        <ExchangeEnquiryScreen
+          onBack={() => setStep(KIOSK_STEPS.FUEL_SELECTION)}
+          onNext={({ isExchangeEnquiry }) => {
+            setErrorMessage('');
+            setWalkinData((prev) => ({
+              ...prev,
+              isExchangeEnquiry
+            }));
             setStep(KIOSK_STEPS.SALESPERSON_SELECTION);
           }}
+          submitting={saving}
         />
       );
     }
@@ -274,7 +296,7 @@ export default function KioskContainer() {
             setStep(
               repeatFlowAction === 'change_salesperson'
                 ? KIOSK_STEPS.REPEAT_CUSTOMER
-                : KIOSK_STEPS.FUEL_SELECTION
+                : KIOSK_STEPS.EXCHANGE_ENQUIRY
             )
           }
           onNext={async ({ salespersonId, salespersonName, locationId, locationName }) => {
@@ -299,7 +321,8 @@ export default function KioskContainer() {
                 fuel_type: selectedFuelTypes,
                 fuel_types: selectedFuelTypes,
                 salesperson_id: salespersonId,
-                location_id: locationId
+                location_id: locationId,
+                is_exchange_enquiry: isRepeatReassignment ? false : walkinData.isExchangeEnquiry
               });
 
               console.assert(Boolean(created?.token_number), '[KIOSK TEST][NEW] Token should be generated for new customer.');

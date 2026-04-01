@@ -986,6 +986,11 @@ export default function ReportsView() {
     filteredIvrRows.filter(r => (r.review_status || 'pending') === 'pending').length,
   [filteredIvrRows]);
 
+  const exchangeEnquiries = useMemo(() => {
+    if (source === 'ivr') return 0;
+    return filteredWalkinRows.filter(r => r.is_exchange_enquiry === true).length;
+  }, [filteredWalkinRows, source]);
+
   // Active filter label shown in the header
   const activeFilterLabel = useMemo(() => {
     const parts = [];
@@ -1146,6 +1151,13 @@ export default function ReportsView() {
               value={filteredConversionReport?.totalConverted ?? 0}
               sub={`${filteredConversionReport?.convRate ?? '0.0'}% conversion rate`}
             />
+            {source !== 'ivr' && (
+              <KpiCard
+                label="Exchange enquiries"
+                value={exchangeEnquiries}
+                sub={exchangeEnquiries > 0 ? 'in this period' : 'none'}
+              />
+            )}
             {source !== 'walkin' && (
               <KpiCard
                 label="IVR pending review"

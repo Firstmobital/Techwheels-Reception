@@ -241,7 +241,8 @@ export async function createWalkIn({
   fuel_type,
   fuel_types,
   salesperson_id,
-  location_id
+  location_id,
+  is_exchange_enquiry = false
 }) {
   const token_number = await getNextTokenNumberForToday();
   const created_at = new Date().toISOString();
@@ -256,7 +257,8 @@ export async function createWalkIn({
     location_id,
     token_number,
     created_at,
-    status: 'assigned'
+    status: 'assigned',
+    is_exchange_enquiry
   };
 
   let data = null;
@@ -401,6 +403,7 @@ export async function getWalkinsByCreatedAtRange({ startIso, endIso }) {
       location_id,
       salesperson_id,
       created_at,
+      is_exchange_enquiry,
       car:car_id(id,name),
       salesperson:salesperson_id(id,first_name,last_name),
       location:location_id(id,name)
