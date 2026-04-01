@@ -75,6 +75,21 @@ function getWalkinSalespersonName(walkin) {
 function getReportDateRange(filterType = 'today', customDate = '') {
   const now = new Date();
 
+  if (filterType === 'thisWeek') {
+    const day = now.getDay();
+    const diffToMon = day === 0 ? -6 : 1 - day;
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diffToMon);
+    const end = addDays(start, 7);
+    return {
+      start,
+      end,
+      label: `Week of ${start.toLocaleDateString(undefined, {
+        day: '2-digit',
+        month: 'short'
+      })}`
+    };
+  }
+
   if (filterType === 'thisMonth') {
     const start = new Date(now.getFullYear(), now.getMonth(), 1);
     const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
