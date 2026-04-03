@@ -82,15 +82,21 @@ function BarChart({ title, items, color }) {
 function WalkinTable({ rows, branches, salespersons, onRowClick }) {
   const [filterSP, setFilterSP] = useState('all');
   const [filterBranch, setFilterBranch] = useState('all');
+  const [filterExchange, setFilterExchange] = useState('all');
 
   const filtered = useMemo(() => {
     return rows.filter(r => {
       const sp = spName(r);
       const br = tv(r?.location?.name);
+      const isExchange = Boolean(r?.is_exchange_enquiry);
+      const exchangeMatch = filterExchange === 'all'
+        || (filterExchange === 'yes' && isExchange)
+        || (filterExchange === 'no' && !isExchange);
       return (filterSP === 'all' || sp === filterSP) &&
-             (filterBranch === 'all' || br === filterBranch);
+             (filterBranch === 'all' || br === filterBranch) &&
+             exchangeMatch;
     });
-  }, [rows, filterSP, filterBranch]);
+  }, [rows, filterSP, filterBranch, filterExchange]);
 
   return (
     <>
@@ -102,6 +108,11 @@ function WalkinTable({ rows, branches, salespersons, onRowClick }) {
         <select className="reports-select" value={filterSP} onChange={e => setFilterSP(e.target.value)}>
           <option value="all">All salespersons</option>
           {salespersons.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select className="reports-select" value={filterExchange} onChange={e => setFilterExchange(e.target.value)}>
+          <option value="all">All exchange</option>
+          <option value="yes">Exchange: Yes</option>
+          <option value="no">Exchange: No</option>
         </select>
         <span className="reports-row-count">{filtered.length} row{filtered.length !== 1 ? 's' : ''}</span>
       </div>
@@ -227,6 +238,7 @@ function IVRTable({ rows, branches, salespersons }) {
 function CombinedTable({ walkinRows, ivrRows, branches, salespersons, onWalkinRowClick }) {
   const [filterBranch, setFilterBranch] = useState('all');
   const [filterSP, setFilterSP] = useState('all');
+  const [filterExchange, setFilterExchange] = useState('all');
 
   const allRows = useMemo(() => {
     const w = walkinRows.map(r => ({
@@ -236,6 +248,7 @@ function CombinedTable({ walkinRows, ivrRows, branches, salespersons, onWalkinRo
       _model: tv(r?.car?.name),
       _fuel: fuelLabel(r.fuel_types ?? r.fuel_type),
       _optyId: r.opty_id,
+      _isExchange: Boolean(r?.is_exchange_enquiry),
     }));
     const iv = ivrRows.map(r => ({
       ...r, _source: 'ivr',
@@ -244,16 +257,21 @@ function CombinedTable({ walkinRows, ivrRows, branches, salespersons, onWalkinRo
       _model: tv(r.model_name),
       _fuel: fuelLabel(r.fuel_type),
       _optyId: r.opty_id,
+      _isExchange: false,
     }));
     return [...w, ...iv].sort((a, b) =>
       new Date(b.created_at) - new Date(a.created_at)
     );
   }, [walkinRows, ivrRows]);
 
-  const filtered = useMemo(() => allRows.filter(r =>
-    (filterBranch === 'all' || r._branch === filterBranch) &&
-    (filterSP === 'all' || r._sp === filterSP)
-  ), [allRows, filterBranch, filterSP]);
+  const filtered = useMemo(() => allRows.filter(r => {
+    const branchMatch = filterBranch === 'all' || r._branch === filterBranch;
+    const spMatch = filterSP === 'all' || r._sp === filterSP;
+    const exchangeMatch = filterExchange === 'all'
+      || (filterExchange === 'yes' && r._source === 'walkin' && r._isExchange)
+      || (filterExchange === 'no' && ((r._source === 'walkin' && !r._isExchange) || r._source === 'ivr'));
+    return branchMatch && spMatch && exchangeMatch;
+  }), [allRows, filterBranch, filterSP, filterExchange]);
 
   return (
     <>
@@ -265,6 +283,11 @@ function CombinedTable({ walkinRows, ivrRows, branches, salespersons, onWalkinRo
         <select className="reports-select" value={filterSP} onChange={e => setFilterSP(e.target.value)}>
           <option value="all">All salespersons</option>
           {salespersons.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select className="reports-select" value={filterExchange} onChange={e => setFilterExchange(e.target.value)}>
+          <option value="all">All exchange</option>
+          <option value="yes">Exchange: Yes</option>
+          <option value="no">Exchange: No</option>
         </select>
         <span className="reports-row-count">{filtered.length} row{filtered.length !== 1 ? 's' : ''}</span>
       </div>
