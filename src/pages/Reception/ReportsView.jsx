@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getWalkinReports } from '../../services/walkinService';
 import { getIVRReports, getIVRLeadsByRange } from '../../services/ivrReportService';
 import { getConversionReport } from '../../services/conversionReportService';
+import WalkinDetailView from './WalkinDetailView';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -78,7 +79,7 @@ function BarChart({ title, items, color }) {
   );
 }
 
-function WalkinTable({ rows, branches, salespersons }) {
+function WalkinTable({ rows, branches, salespersons, onRowClick }) {
   const [filterSP, setFilterSP] = useState('all');
   const [filterBranch, setFilterBranch] = useState('all');
 
@@ -120,7 +121,11 @@ function WalkinTable({ rows, branches, salespersons }) {
             {filtered.map(row => {
               const optySubmitted = String(row.opty_status || '').toLowerCase() === 'submitted';
               return (
-                <tr key={row.id}>
+                <tr
+                  key={row.id}
+                  onClick={() => onRowClick?.(row)}
+                  style={onRowClick ? { cursor: 'pointer' } : undefined}
+                >
                   <td>{fmtDate(row.created_at)}</td>
                   <td>{fmtTime(row.created_at)}</td>
                   <td>{tv(row.customer_name)}</td>
@@ -219,7 +224,7 @@ function IVRTable({ rows, branches, salespersons }) {
   );
 }
 
-function CombinedTable({ walkinRows, ivrRows, branches, salespersons }) {
+function CombinedTable({ walkinRows, ivrRows, branches, salespersons, onWalkinRowClick }) {
   const [filterBranch, setFilterBranch] = useState('all');
   const [filterSP, setFilterSP] = useState('all');
 
@@ -277,7 +282,14 @@ function CombinedTable({ walkinRows, ivrRows, branches, salespersons }) {
               <tr><td colSpan={10} className="reports-empty-cell">No records for this period.</td></tr>
             )}
             {filtered.map(row => (
-              <tr key={`${row._source}-${row.id}`}>
+              <tr
+                key={`${row._source}-${row.id}`}
+                onClick={() => {
+                  if (row._source === 'walkin') onWalkinRowClick?.(row);
+                }}
+                style={row._source === 'walkin' && onWalkinRowClick ? { cursor: 'pointer' } : undefined}
+                title={row._source === 'walkin' ? 'Click to view / edit walk-in' : undefined}
+              >
                 <td>{fmtDate(row.created_at)}</td>
                 <td>{fmtTime(row.created_at)}</td>
                 <td>
@@ -823,6 +835,7 @@ export default function ReportsView() {
   const [conversionReport, setConversionReport] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [selectedWalkinId, setSelectedWalkinId] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -954,6 +967,11 @@ export default function ReportsView() {
       reviewStatusBreakdown:  ivrAgg.reviewStatusBreakdown,
     };
   }, [source, walkinReport, ivrReport, filteredWalkinRows, filteredIvrRows, walkinAgg, ivrAgg]);
+
+  const selectedWalkin = useMemo(() => {
+    if (!selectedWalkinId || !walkinReport?.rows?.length) return null;
+    return walkinReport.rows.find((row) => row.id === selectedWalkinId) || null;
+  }, [selectedWalkinId, walkinReport]);
 
   // ── Options for within-table dropdowns (branch + salesperson) ───────────
   const walkinBranches = useMemo(() =>
@@ -1227,6 +1245,7 @@ export default function ReportsView() {
                   rows={filteredWalkinRows}
                   branches={walkinBranches}
                   salespersons={walkinSPs}
+                  onRowClick={(row) => setSelectedWalkinId(row.id)}
                 />
               )}
               {source === 'ivr' && (
@@ -1242,12 +1261,21 @@ export default function ReportsView() {
                   ivrRows={filteredIvrRows}
                   branches={allBranches}
                   salespersons={allSPs}
+                  onWalkinRowClick={(row) => setSelectedWalkinId(row.id)}
                 />
               )}
             </div>
           )}
         </>
       ) : null}
+
+      {selectedWalkin && (
+        <WalkinDetailView
+          walkin={selectedWalkin}
+          onClose={() => setSelectedWalkinId(null)}
+          onRefresh={load}
+        />
+      )}
     </section>
   );
 }
