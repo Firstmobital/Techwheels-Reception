@@ -478,3 +478,76 @@ export async function getWalkinReports({
     rows: walkins
   };
 }
+
+export async function updateWalkIn(walkinId, {
+  customer_name,
+  mobile_number,
+  purpose,
+  car_id,
+  fuel_type,
+  fuel_types,
+  salesperson_id,
+  location_id,
+  status
+}) {
+  // First, fetch the walk-in to check if it was created today
+  const { data: walkinData, error: fetchError } = await supabase
+    .from(WALKINS_TABLE)
+    .select('created_at')
+    .eq('id', walkinId)
+    .maybeSingle();
+
+  if (fetchError) throw fetchError;
+  if (!walkinData) throw new Error('Walk-in not found.');
+
+  // Check if walk-in was created today
+  const walkinDate = toStartOfDay(new Date(walkinData.created_at));
+  const today = toStartOfDay(new Date());
+  if (walkinDate.getTime() !== today.getTime()) {
+    throw new Error('Can only edit walk-ins created today.');
+  }
+
+  // Prepare payload with only defined fields
+  const normalizedFuelType = fuel_type ?? fuel_types ?? null;
+  const payload = {};
+
+  if (customer_name !== undefined) payload.customer_name = customer_name;
+  if (mobile_number !== undefined) payload.mobile_number = mobile_number;
+  if (purpose !== undefined) payload.purpose = purpose;
+  if (car_id !== undefined) payload.car_id = car_id;
+  if (salesperson_id !== undefined) payload.salesperson_id = salesperson_id;
+  if (location_id !== undefined) payload.location_id = location_id;
+  if (status !== undefined) payload.status = status;
+
+  // Try updating with fuel_type first, then fuel_types if that fails
+  let data = null;
+  let error = null;
+
+  if (normalizedFuelType !== null) {
+    ({ data, error } = await supabase
+      .from(WALKINS_TABLE)
+      .update({ ...payload, fuel_type: normalizedFuelType })
+      .eq('id', walkinId)
+      .select()
+      .single());
+
+    if (error && String(error.message || '').toLowerCase().includes('fuel_type')) {
+      ({ data, error } = await supabase
+        .from(WALKINS_TABLE)
+        .update({ ...payload, fuel_types: normalizedFuelType })
+        .eq('id', walkinId)
+        .select()
+        .single());
+    }
+  } else if (Object.keys(payload).length > 0) {
+    ({ data, error } = await supabase
+      .from(WALKINS_TABLE)
+      .update(payload)
+      .eq('id', walkinId)
+      .select()
+      .single());
+  }
+
+  if (error) throw error;
+  return data;
+}

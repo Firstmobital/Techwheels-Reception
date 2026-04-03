@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getWalkinReports } from '../../services/walkinService';
+import WalkinDetailView from './WalkinDetailView';
 
 export default function ReceptionDashboard() {
   const defaultCustomDate = useMemo(() => new Date().toISOString().slice(0, 10), []);
@@ -11,6 +12,7 @@ export default function ReceptionDashboard() {
   const [errorMessage, setErrorMessage] = useState('');
   const [selectedSalesperson, setSelectedSalesperson] = useState('all');
   const [selectedBranch, setSelectedBranch] = useState('all');
+  const [selectedWalkinId, setSelectedWalkinId] = useState(null);
 
   const loadReports = useCallback(async () => {
     setLoading(true);
@@ -96,6 +98,11 @@ export default function ReceptionDashboard() {
       return matchesSalesperson && matchesBranch;
     });
   }, [tableRows, selectedSalesperson, selectedBranch]);
+
+  const selectedWalkin = useMemo(() => {
+    if (!selectedWalkinId || !tableRows) return null;
+    return tableRows.find((row) => row.id === selectedWalkinId) || null;
+  }, [selectedWalkinId, tableRows]);
 
   useEffect(() => {
     if (selectedSalesperson !== 'all' && !salespersonOptions.includes(selectedSalesperson)) {
@@ -341,7 +348,7 @@ export default function ReceptionDashboard() {
                         const showOptyId = optyStatus.toLowerCase() === 'submitted';
 
                         return (
-                          <tr key={row.id}>
+                          <tr key={row.id} onClick={() => setSelectedWalkinId(row.id)} style={{ cursor: 'pointer' }}>
                             <td>{formatDate(row.created_at)}</td>
                             <td>{formatTime(row.created_at)}</td>
                             <td>{getTableValue(row.customer_name)}</td>
@@ -372,6 +379,14 @@ export default function ReceptionDashboard() {
           )}
         </>
       ) : null}
+
+      {selectedWalkin && (
+        <WalkinDetailView
+          walkin={selectedWalkin}
+          onClose={() => setSelectedWalkinId(null)}
+          onRefresh={loadReports}
+        />
+      )}
     </section>
   );
 }
