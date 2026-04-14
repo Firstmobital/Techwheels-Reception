@@ -79,7 +79,7 @@ export async function submitOptyId(source_type, id, opty_id) {
       ? IVR_LEADS_TABLE
       : 'ai_leads';
 
-  const { data, error } = await supabase
+  const { data, error, count } = await supabase
     .from(tableName)
     .update({
       opty_id,
@@ -88,6 +88,8 @@ export async function submitOptyId(source_type, id, opty_id) {
     })
     .eq('id', id)
     .select();
+
+  console.log('submitOptyId debug:', { tableName, id, data, error, count });
 
   if (error) throw error;
   if (!data || data.length === 0) {
