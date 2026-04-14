@@ -87,11 +87,13 @@ export async function submitOptyId(source_type, id, opty_id) {
       opty_submitted_at: new Date().toISOString()
     })
     .eq('id', id)
-    .select()
-    .single();
+    .select();
 
   if (error) throw error;
-  return data;
+  if (!data || data.length === 0) {
+    throw new Error('Record not found or update failed.');
+  }
+  return data[0];
 }
 
 export async function getTodayGreenFormStats() {
