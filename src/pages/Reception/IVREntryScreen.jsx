@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { createIVRLead, createBatchDraftLeads, updateIVRLead } from '../../services/ivrService';
+import { createIVRLead, createBatchDraftLeads, updateIVRLead, getLatestUploadedBatch } from '../../services/ivrService';
 import {
   getAvailableCars,
   getLocations,
@@ -1012,6 +1012,10 @@ export default function IVREntryScreen() {
   // Transcription batch creation state
   const [transcriptionStarted, setTranscriptionStarted] = useState(false);
   const [batchingLeads, setBatchingLeads] = useState(false);
+  // Upload success feedback
+  const [uploadSuccessMsg, setUploadSuccessMsg] = useState('');
+  // Track if we're fetching latest batch on mount
+  const [isCheckingLatestBatch, setIsCheckingLatestBatch] = useState(false);
 
   useEffect(() => {
     rowsRef.current = rows;
@@ -1028,6 +1032,66 @@ export default function IVREntryScreen() {
     getLocations().then(data => { if (mounted) setLocations(data || []); }).catch(() => {}).finally(() => { if (mounted) setLoadingLocations(false); });
     return () => { mounted = false; };
   }, []);
+
+  // Fetch latest uploaded batch when component mounts or "entry" tab is active (if no rows currently loaded)
+  useEffect(() => {
+    if (activeTab !== 'entry' || hasImported || rows.length > 0) return;
+
+    const fetchLatestBatch = async () => {
+      setIsCheckingLatestBatch(true);
+      try {
+        const latestBatch = await getLatestUploadedBatch(60); // Look back 60 minutes
+        if (latestBatch && latestBatch.length > 0) {
+          // Convert DB records to row format for display
+          const convertedRows = latestBatch.map((lead, index) => ({
+            id: String(lead.id),
+            ivrLeadsId: lead.id,
+            index,
+            mobile: lead.mobile_number,
+            callDate: lead.call_datetime ? new Date(lead.call_datetime).toLocaleDateString() : null,
+            connectedToRaw: null,
+            callRecordingUrl: lead.call_recording_url || null,
+            dbLead: {
+              id: lead.id,
+              customer_name: lead.customer_name,
+              model_name: lead.model_name,
+              fuel_type: lead.fuel_type,
+              remarks: lead.remarks,
+              conversation_summary: lead.conversation_summary,
+              transcript: lead.transcript,
+              transcription_status: lead.transcription_status,
+              transcription_error: lead.transcription_error,
+              call_recording_url: lead.call_recording_url,
+            },
+            matchedSalesperson: null,
+            matchedSalespersonId: lead.salesperson_id ? String(lead.salesperson_id) : '',
+            matchedLocationId: lead.location_id ? String(lead.location_id) : '',
+            isDuplicate: false,
+            duplicateSince: null,
+            status: lead.transcription_status === 'completed' ? STATUS.SAVED : STATUS.PENDING,
+            savedSummary: lead.conversation_summary || null,
+            errorMessage: null,
+            transcription_status: lead.transcription_status,
+            transcription_error: lead.transcription_error,
+          }));
+
+          setRows(convertedRows);
+          setHasImported(true);
+          setTranscriptionStarted(true); // Enable polling for latest data
+          setUploadSuccessMsg(`Showing latest ${convertedRows.length} uploaded entries (restored from database)`);
+          
+          // Clear success message after 4 seconds
+          setTimeout(() => setUploadSuccessMsg(''), 4000);
+        }
+      } catch (err) {
+        console.error('Failed to fetch latest batch:', err);
+      } finally {
+        setIsCheckingLatestBatch(false);
+      }
+    };
+
+    fetchLatestBatch();
+  }, [activeTab, hasImported, rows.length]);
 
   // Poll for transcription status updates
   useEffect(() => {
@@ -1092,7 +1156,7 @@ export default function IVREntryScreen() {
     const isCsv = file.name.endsWith('.csv');
     if (!isZip && !isCsv) { setFileError('Please upload the ZIP file downloaded from your IVR portal, or a CSV file.'); e.target.value = ''; return; }
     if (!selectedUploadLocationId) { setFileError(UPLOAD_BRANCH_REQUIRED_ERROR); e.target.value = ''; return; }
-    setFileError(''); setImporting(true);
+    setFileError(''); setImporting(true); setUploadSuccessMsg('');
     try {
       let text;
       if (isZip) {
@@ -1118,6 +1182,7 @@ export default function IVREntryScreen() {
         checkDuplicatePhones(allMobiles),
       ]);
 
+      // Prepare rows with preview data
       const newRows = parsed.map(({ mobile, callDate, connectedToRaw, callRecordingUrl }, index) => {
         const connectedNormalized = normalizePhone(connectedToRaw);
         const matchedSalesperson = connectedNormalized ? empByMobile.get(connectedNormalized) || null : null;
@@ -1125,7 +1190,7 @@ export default function IVREntryScreen() {
         const duplicateSince = isDuplicate ? duplicateMap.get(mobile) : null;
         return {
           id: `preview-${index}-${mobile}`,
-          ivrLeadsId: null, // Not saved yet — will be saved only when executive acts
+          ivrLeadsId: null,
           index,
           mobile,
           callDate,
@@ -1137,7 +1202,7 @@ export default function IVREntryScreen() {
           matchedLocationId: String(selectedUploadLocationId),
           isDuplicate,
           duplicateSince,
-          status: STATUS.PENDING,
+          status: STATUS.SAVING,
           savedSummary: null,
           errorMessage: null,
           transcription_status: null,
@@ -1145,16 +1210,64 @@ export default function IVREntryScreen() {
         };
       });
 
-      setRows(newRows); setHasImported(true); setStatusFilter(null);
-      setTimeout(() => {
-        const firstId = newRows[0]?.id;
-        if (firstId) { interestedBtnRefs.current[firstId]?.focus(); setFocusedRowId(firstId); }
-      }, 100);
-    } catch (err) { setFileError(err?.message || 'Failed to process file.'); }
+      // Show preview with "saving" status
+      setRows(newRows);
+      setHasImported(true);
+      setStatusFilter(null);
+
+      // AUTO-SAVE: Create batch draft leads immediately
+      const draftLeads = newRows.map(row => ({
+        mobile: row.mobile,
+        callDate: row.callDate || null,
+        callRecordingUrl: row.callRecordingUrl || null,
+        locationId: selectedUploadLocationId,
+        salespersonId: row.matchedSalesperson?.id || null,
+      }));
+
+      try {
+        const createdLeads = await createBatchDraftLeads(draftLeads);
+        
+        // Map returned lead IDs back to rows by mobile number
+        const leadMap = new Map(createdLeads.map(lead => [lead.mobile_number, lead.id]));
+        const savedRowsCount = createdLeads.length;
+
+        setRows(prev => prev.map(row => {
+          const leadId = leadMap.get(row.mobile);
+          if (leadId) {
+            return {
+              ...row,
+              ivrLeadsId: leadId,
+              status: STATUS.SAVED,
+              transcription_status: row.callRecordingUrl ? 'pending' : null,
+            };
+          }
+          return row;
+        }));
+
+        setTranscriptionStarted(true);
+        setUploadSuccessMsg(`✓ Saved ${savedRowsCount} new entries. Transcription in progress...`);
+
+        // Auto-clear success message after 4 seconds
+        setTimeout(() => setUploadSuccessMsg(''), 4000);
+
+        // Focus first row after successful save
+        setTimeout(() => {
+          const firstId = newRows[0]?.id;
+          if (firstId) { interestedBtnRefs.current[firstId]?.focus(); setFocusedRowId(firstId); }
+        }, 100);
+      } catch (autoSaveErr) {
+        // If auto-save fails, show error but allow user to proceed
+        console.error('Auto-save failed:', autoSaveErr);
+        setFileError(`Upload processed but saving to database failed: ${autoSaveErr?.message || 'Unknown error'}. Try uploading again.`);
+        setRows(prev => prev.map(r => ({ ...r, status: STATUS.ERROR, errorMessage: 'Failed to save entry' })));
+      }
+    } catch (err) { 
+      setFileError(err?.message || 'Failed to process file.');
+    }
     finally { setImporting(false); e.target.value = ''; }
   };
 
-  const handleReset = () => { setRows([]); setHasImported(false); setFileError(''); setStatusFilter(null); setFocusedRowId(null); setTranscriptionStarted(false); interestedBtnRefs.current = {}; };
+  const handleReset = () => { setRows([]); setHasImported(false); setFileError(''); setStatusFilter(null); setFocusedRowId(null); setTranscriptionStarted(false); setUploadSuccessMsg(''); interestedBtnRefs.current = {}; };
 
   // No background DB sync needed — rows are inserted only when executive acts,
   // so there is no pre-existing DB record to poll for transcription updates.
@@ -1173,12 +1286,20 @@ export default function IVREntryScreen() {
   }, []);
 
   const handleStartTranscription = useCallback(async () => {
+    // This is now a fallback in case auto-save didn't occur (e.g., if entries were manually created)
+    // In most cases, this won't be called since auto-save happens during file upload
     if (rows.length === 0 || transcriptionStarted || batchingLeads) return;
+    
+    const rowsNeedingSave = rows.filter(r => !r.ivrLeadsId);
+    if (rowsNeedingSave.length === 0) {
+      // All rows already saved, just start polling
+      setTranscriptionStarted(true);
+      return;
+    }
 
     setBatchingLeads(true);
     try {
-      // Extract minimal data from rows to create draft leads
-      const draftLeads = rows.map(row => ({
+      const draftLeads = rowsNeedingSave.map(row => ({
         mobile: row.mobile,
         callDate: row.callDate || null,
         callRecordingUrl: row.callRecordingUrl || null,
@@ -1186,22 +1307,19 @@ export default function IVREntryScreen() {
         salespersonId: row.matchedSalesperson?.id || null,
       }));
 
-      // Create batch draft leads (inserts into DB and invokes transcription)
       const createdLeads = await createBatchDraftLeads(draftLeads);
-
-      // Map returned lead IDs back to rows by mobile number
       const leadMap = new Map(createdLeads.map(lead => [lead.mobile_number, lead.id]));
+      
       setRows(prev => prev.map(row => {
         const leadId = leadMap.get(row.mobile);
-        return leadId ? { ...row, ivrLeadsId: leadId, transcription_status: row.callRecordingUrl ? 'pending' : null } : row;
+        return leadId ? { ...row, ivrLeadsId: leadId, status: STATUS.SAVED, transcription_status: row.callRecordingUrl ? 'pending' : null } : row;
       }));
 
       setTranscriptionStarted(true);
-      // Show toast-like feedback via console for now; you can add a proper toast library later
       console.log(`✓ Started transcription for ${createdLeads.length} leads`);
     } catch (err) {
       console.error('Failed to start transcription batch:', err);
-      // Could show error toast here
+      setFileError(`Failed to start transcription: ${err?.message || 'Unknown error'}`);
     } finally {
       setBatchingLeads(false);
     }
@@ -1402,7 +1520,8 @@ export default function IVREntryScreen() {
               <input ref={fileInputRef} type="file" accept=".zip,.csv" className="hidden" onChange={handleFileChange} />
             </div>
             {fileError && <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{fileError}</div>}
-            <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800">Upload the <strong>ZIP file</strong> directly from your IVR portal. Leads are <strong>only saved</strong> when you mark them Interested or Uninterested — untouched rows are discarded.</div>
+            {uploadSuccessMsg && <div className="rounded-xl bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-700 font-medium">{uploadSuccessMsg}</div>}
+            <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800">Upload the <strong>ZIP file</strong> directly from your IVR portal. Leads are <strong>automatically saved and transcription starts immediately</strong>. Mark them Interested or Uninterested to complete the process.</div>
           </div>
         ) : (
           <div className="space-y-3">

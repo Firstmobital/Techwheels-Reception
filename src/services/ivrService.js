@@ -66,6 +66,27 @@ export async function getIVRLeads() {
 }
 
 /**
+ * Fetches the latest batch of uploaded IVR entries from the last N minutes.
+ * Used to restore uploaded entries after user navigates away and returns to the entry tab.
+ * 
+ * @param {number} minutesWindow - Look back this many minutes (default: 60)
+ * @returns {Promise<Array>} Array of recent leads with full details
+ */
+export async function getLatestUploadedBatch(minutesWindow = 60) {
+  const cutoffTime = new Date(Date.now() - minutesWindow * 60 * 1000).toISOString();
+  
+  const { data, error } = await supabase
+    .from(IVR_LEADS_TABLE)
+    .select('id, mobile_number, call_datetime, call_recording_url, customer_name, model_name, fuel_type, remarks, conversation_summary, transcript, transcription_status, transcription_error, salesperson_id, location_id, review_status, created_at')
+    .gte('created_at', cutoffTime)
+    .eq('review_status', 'pending')
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return data || [];
+}
+
+/**
  * Creates multiple draft IVR leads in a single batch and invokes transcription for each.
  * Used when user clicks "Preview & Start Transcription" button.
  * 
