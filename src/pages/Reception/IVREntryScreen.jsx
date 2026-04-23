@@ -1068,7 +1068,7 @@ export default function IVREntryScreen() {
             matchedLocationId: lead.location_id ? String(lead.location_id) : '',
             isDuplicate: false,
             duplicateSince: null,
-            status: lead.transcription_status === 'completed' ? STATUS.SAVED : STATUS.PENDING,
+            status: STATUS.PENDING,
             savedSummary: lead.conversation_summary || null,
             errorMessage: null,
             transcription_status: lead.transcription_status,
@@ -1237,7 +1237,7 @@ export default function IVREntryScreen() {
             return {
               ...row,
               ivrLeadsId: leadId,
-              status: STATUS.SAVED,
+              status: STATUS.PENDING,
               transcription_status: row.callRecordingUrl ? 'pending' : null,
             };
           }
@@ -1312,7 +1312,7 @@ export default function IVREntryScreen() {
       
       setRows(prev => prev.map(row => {
         const leadId = leadMap.get(row.mobile);
-        return leadId ? { ...row, ivrLeadsId: leadId, status: STATUS.SAVED, transcription_status: row.callRecordingUrl ? 'pending' : null } : row;
+        return leadId ? { ...row, ivrLeadsId: leadId, status: STATUS.PENDING, transcription_status: row.callRecordingUrl ? 'pending' : null } : row;
       }));
 
       setTranscriptionStarted(true);
