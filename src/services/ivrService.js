@@ -168,3 +168,80 @@ export async function updateIVRLead(leadId, data) {
   if (error) throw error;
   return updatedLead;
 }
+
+export async function getExistingIVRMobileNumbers(mobiles) {
+  if (!mobiles || mobiles.length === 0) return new Set();
+
+  const uniqueMobiles = [...new Set(mobiles.filter(Boolean))];
+  const existing = new Set();
+  const chunkSize = 500;
+
+  for (let i = 0; i < uniqueMobiles.length; i += chunkSize) {
+    const chunk = uniqueMobiles.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .from(IVR_LEADS_TABLE)
+      .select('mobile_number')
+      .in('mobile_number', chunk);
+
+    if (error) throw error;
+    (data || []).forEach((row) => {
+      if (row?.mobile_number) existing.add(row.mobile_number);
+    });
+  }
+
+  return existing;
+}
+
+export async function importMissedIVRLeads({ locationId, leads }) {
+  if (!locationId) throw new Error('Please select a branch before uploading.');
+  if (!leads || leads.length === 0) {
+    return { insertedCount: 0, insertedRows: [] };
+  }
+
+  const normalizedLocationId = Number(locationId);
+  if (!Number.isFinite(normalizedLocationId)) {
+    throw new Error('Invalid branch selected.');
+  }
+
+  const insertPayload = leads.map((lead) => ({
+    mobile_number: lead.mobile,
+    call_datetime: lead.callDate ? new Date(lead.callDate).toISOString() : null,
+    location_id: normalizedLocationId,
+    is_missed: true,
+    review_status: 'pending',
+    opty_status: 'pending',
+  }));
+
+  const { data, error } = await supabase
+    .from(IVR_LEADS_TABLE)
+    .insert(insertPayload)
+    .select('id, mobile_number, location_id, created_at, is_missed');
+
+  if (error) throw error;
+  const insertedRows = data || [];
+  return { insertedCount: insertedRows.length, insertedRows };
+}
+
+export async function getMissedUploadLastByLocation() {
+  const { data, error } = await supabase
+    .from(IVR_LEADS_TABLE)
+    .select('location_id, created_at')
+    .eq('is_missed', true)
+    .not('location_id', 'is', null);
+
+  if (error) throw error;
+
+  const lastByLocation = new Map();
+  (data || []).forEach((row) => {
+    const locationId = row?.location_id;
+    const createdAt = row?.created_at;
+    if (!locationId || !createdAt) return;
+
+    const previous = lastByLocation.get(String(locationId));
+    if (!previous || new Date(createdAt).getTime() > new Date(previous).getTime()) {
+      lastByLocation.set(String(locationId), createdAt);
+    }
+  });
+
+  return lastByLocation;
+}

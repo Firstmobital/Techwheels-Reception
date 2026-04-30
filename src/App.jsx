@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import KioskContainer from './pages/Kiosk/KioskContainer';
 import ReportsView from './pages/Reception/ReportsView';
 import IVREntryScreen from './pages/Reception/IVREntryScreen';
+import IVRMissedScreen from './pages/Reception/IVRMissedScreen';
 import GreenFormQueue from './pages/Reception/GreenFormQueue';
 import LoginPage from './pages/LoginPage';
 import { clearAuthSession, restoreAuthSession } from './services/authService';
@@ -61,6 +62,13 @@ export default function App() {
         </button>
         <button
           type="button"
+          className={activeInterface === 'ivr-missed' ? 'active' : ''}
+          onClick={() => setActiveInterface('ivr-missed')}
+        >
+          IVR Missed
+        </button>
+        <button
+          type="button"
           className={activeInterface === 'green-form' ? 'active' : ''}
           onClick={() => setActiveInterface('green-form')}
         >
@@ -75,6 +83,7 @@ export default function App() {
         {activeInterface === 'kiosk' ? <KioskContainer /> : null}
         {activeInterface === 'dashboard' ? <ReportsView /> : null}
         {activeInterface === 'ivr-entry' ? <IVREntryScreen /> : null}
+        {activeInterface === 'ivr-missed' ? <IVRMissedScreen /> : null}
         {activeInterface === 'green-form' ? <GreenFormQueue /> : null}
       </main>
     </div>
